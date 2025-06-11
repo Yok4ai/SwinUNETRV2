@@ -403,12 +403,25 @@ class BrainTumorSegmentation(pl.LightningModule):
         self, 
         train_loader, 
         val_loader, 
-        max_epochs=100, 
+        max_epochs=50, 
         val_interval=1, 
-        learning_rate=1e-3,  # Higher LR for smaller model
-        embed_dim=32,
-        depths=[1, 1, 1, 1],
-        decoder_embed_dim=64
+        learning_rate=2e-3,
+        img_size=128,
+        feature_size=48,
+        embed_dim=48,
+        depths=[2, 2, 6, 2],
+        num_heads=[3, 6, 12, 24],
+        window_size=7,
+        mlp_ratio=4.0,
+        decoder_embed_dim=256,
+        patch_size=4,
+        weight_decay=1e-4,
+        warmup_epochs=5,
+        drop_rate=0.1,
+        attn_drop_rate=0.1,
+        roi_size=(128, 128, 128),
+        sw_batch_size=2,
+        overlap=0.25
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -419,8 +432,12 @@ class BrainTumorSegmentation(pl.LightningModule):
             out_channels=3,
             embed_dim=embed_dim,
             depths=depths,
+            num_heads=num_heads,
+            window_size=window_size,
+            mlp_ratio=mlp_ratio,
             decoder_embed_dim=decoder_embed_dim,
-            dropout=0.1
+            patch_size=patch_size,
+            dropout=drop_rate
         )
         
         # Print model size
@@ -443,6 +460,9 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.best_metric = -1
         self.train_loader = train_loader
         self.val_loader = val_loader
+        self.roi_size = roi_size
+        self.sw_batch_size = sw_batch_size
+        self.overlap = overlap
 
         # Training metrics
         self.avg_train_loss_values = []
@@ -508,10 +528,10 @@ class BrainTumorSegmentation(pl.LightningModule):
         
         val_outputs = sliding_window_inference(
             val_inputs, 
-            roi_size=(96, 96, 96), 
-            sw_batch_size=1, 
+            roi_size=self.roi_size, 
+            sw_batch_size=self.sw_batch_size, 
             predictor=self.model,
-            overlap=0.5
+            overlap=self.overlap
         )
         
         val_loss = self.loss_function(val_outputs, val_labels)
@@ -568,10 +588,22 @@ class BrainTumorSegmentation(pl.LightningModule):
         optimizer = AdamW(
             self.model.parameters(), 
             lr=self.hparams.learning_rate, 
-            weight_decay=1e-4  # Slightly higher weight decay for small model
+            weight_decay=self.hparams.weight_decay
         )
         
-        scheduler = CosineAnnealingLR(optimizer, T_max=self.hparams.max_epochs)
+        # Add warmup scheduler
+        total_steps = len(self.train_loader) * self.hparams.max_epochs
+        warmup_steps = len(self.train_loader) * self.hparams.warmup_epochs
+        
+        scheduler = {
+            'scheduler': CosineAnnealingLR(
+                optimizer, 
+                T_max=total_steps - warmup_steps
+            ),
+            'interval': 'step',
+            'frequency': 1
+        }
+        
         return [optimizer], [scheduler]
 
 

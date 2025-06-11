@@ -47,22 +47,45 @@ if __name__ == "__main__":
     
     # Data parameters
     parser.add_argument("--input_dir", type=str, required=True, help="Input directory containing data")
-    parser.add_argument("--batch_size", type=int, default=2, help="Batch size for training")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size for training")
+    parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for data loading")
+    parser.add_argument("--pin_memory", action="store_true", default=True, help="Enable pin memory for faster GPU transfer")
+    parser.add_argument("--persistent_workers", action="store_true", default=True, help="Keep workers alive between epochs")
     
     # Model parameters
-    parser.add_argument("--img_size", type=int, default=96, help="Input image size")
+    parser.add_argument("--img_size", type=int, default=128, help="Input image size")
     parser.add_argument("--in_channels", type=int, default=4, help="Number of input channels (4 for BraTS)")
     parser.add_argument("--out_channels", type=int, default=3, help="Number of output channels (3 for BraTS)")
     parser.add_argument("--feature_size", type=int, default=48, help="Feature size")
-    parser.add_argument("--drop_rate", type=float, default=0.0, help="Dropout rate")
-    parser.add_argument("--attn_drop_rate", type=float, default=0.0, help="Attention dropout rate")
-    parser.add_argument("--dropout_path_rate", type=float, default=0.0, help="Dropout path rate")
+    parser.add_argument("--embed_dim", type=int, default=48, help="Embedding dimension")
+    parser.add_argument("--depths", type=int, nargs='+', default=[2, 2, 6, 2], help="Depths of each stage")
+    parser.add_argument("--num_heads", type=int, nargs='+', default=[3, 6, 12, 24], help="Number of attention heads")
+    parser.add_argument("--window_size", type=int, default=7, help="Window size for attention")
+    parser.add_argument("--mlp_ratio", type=float, default=4.0, help="MLP ratio")
+    parser.add_argument("--decoder_embed_dim", type=int, default=256, help="Decoder embedding dimension")
+    parser.add_argument("--patch_size", type=int, default=4, help="Patch size")
+    parser.add_argument("--drop_rate", type=float, default=0.1, help="Dropout rate")
+    parser.add_argument("--attn_drop_rate", type=float, default=0.1, help="Attention dropout rate")
     parser.add_argument("--use_checkpoint", action="store_true", help="Use checkpoint for memory efficiency")
     
     # Training parameters
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--epochs", type=int, default=30, help="Number of epochs")
+    parser.add_argument("--learning_rate", type=float, default=2e-3, help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs")
+    parser.add_argument("--warmup_epochs", type=int, default=5, help="Number of warmup epochs")
     parser.add_argument("--device", type=str, default="cuda", help="Device to use (cuda/cpu)")
+    parser.add_argument("--use_amp", action="store_true", default=True, help="Use automatic mixed precision")
+    parser.add_argument("--gradient_clip_val", type=float, default=1.0, help="Gradient clipping value")
+    
+    # Validation settings
+    parser.add_argument("--val_interval", type=int, default=1, help="Validation interval in epochs")
+    parser.add_argument("--save_interval", type=int, default=10, help="Model save interval in epochs")
+    parser.add_argument("--early_stopping_patience", type=int, default=15, help="Early stopping patience")
+    
+    # Inference parameters
+    parser.add_argument("--roi_size", type=int, nargs='+', default=[128, 128, 128], help="ROI size for sliding window inference")
+    parser.add_argument("--sw_batch_size", type=int, default=2, help="Sliding window batch size")
+    parser.add_argument("--overlap", type=float, default=0.25, help="Overlap for sliding window inference")
     
     args = parser.parse_args()
     main(args) 
