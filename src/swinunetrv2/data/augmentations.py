@@ -10,7 +10,6 @@ from monai.transforms import (
     RandScaleIntensityd,
     RandShiftIntensityd,
     EnsureTyped,
-    SqueezeDimd,
 )
 from swinunetrv2.utils.convert_labels import ConvertLabels
 
@@ -30,7 +29,6 @@ def get_transforms(img_size=96):
         RandShiftIntensityd(keys="image", offsets=0.1, prob=0.5),
         EnsureTyped(keys=["image", "label"]),
         ConvertLabels(keys=["label"]),
-        SqueezeDimd(keys=["label"], dim=0),
     ])
     
     val_transforms = Compose([
@@ -41,7 +39,6 @@ def get_transforms(img_size=96):
         NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
         EnsureTyped(keys=["image", "label"]),
         ConvertLabels(keys=["label"]),
-        SqueezeDimd(keys=["label"], dim=0),
     ])
     
     return train_transforms, val_transforms

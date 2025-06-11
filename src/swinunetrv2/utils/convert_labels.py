@@ -20,5 +20,6 @@ class ConvertLabels(MapTransform):
             result.append(torch.logical_or(torch.logical_or(d[key] == 1, d[key] == 2), d[key] == 3))
             # Enhancing Tumor (ET) = Enhancing Tumor (label 3)
             result.append(d[key] == 3)
-            d[key] = torch.stack(result, axis=0).float()
+            # Stack along channel dimension (1) instead of creating a new dimension
+            d[key] = torch.stack(result, dim=1).float()
         return d
