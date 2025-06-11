@@ -4,75 +4,88 @@ import json
 import subprocess
 import sys
 import matplotlib.pyplot as plt
+from pathlib import Path
+import shutil
+import re
 
 def setup_kaggle_environment():
-    """Setup the required environment for Kaggle."""
-    # Install MONAI with specific dependencies
-    subprocess.check_call([
-        sys.executable, "-c",
-        "import monai" if subprocess.run([sys.executable, "-c", "import monai"]).returncode == 0
-        else "import sys; subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'monai-weekly[nibabel, tqdm, einops]'])"
-    ])
+    """Setup the Kaggle notebook environment."""
+    # Install required packages
+    packages = [
+        "monai",
+        "matplotlib",
+        "einops",
+        "torch",
+        "torchvision",
+        "pytorch-lightning",
+        "nibabel",
+        "scikit-learn",
+        "tqdm",
+        "numpy",
+        "pandas"
+    ]
     
-    # Install matplotlib if not present
-    subprocess.check_call([
-        sys.executable, "-c",
-        "import matplotlib" if subprocess.run([sys.executable, "-c", "import matplotlib"]).returncode == 0
-        else "import sys; subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'matplotlib'])"
-    ])
-    
-    # Install einops
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "einops"])
-    
-    # Set matplotlib to inline mode
-    plt.rcParams['figure.figsize'] = [12, 8]
-    plt.style.use('seaborn')
+    for package in packages:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
     
     # Print installed versions
     print("Environment setup complete. Installed packages:")
-    subprocess.check_call([sys.executable, "-m", "pip", "list", "|", "grep", "-E", "monai|matplotlib|einops"])
+    result = subprocess.check_output([sys.executable, "-m", "pip", "list"]).decode()
+    # Filter for relevant packages
+    relevant_packages = [line for line in result.split('\n') 
+                        if any(pkg in line.lower() for pkg in ['monai', 'matplotlib', 'einops'])]
+    print('\n'.join(relevant_packages))
 
 def prepare_brats_data(input_dir, output_dir):
-    """Prepare BraTS data and create dataset.json file."""
+    """Prepare BraTS data for training."""
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
     
-    # Get sorted file paths and file names
-    file_paths = glob.glob(os.path.join(input_dir, '*'))
-    file_paths.sort()
+    # Get list of all case directories
+    case_dirs = [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))]
     
-    file_names = [os.path.basename(path) for path in file_paths]
-    file_names.sort()
-    
-    # Initialize lists for different MRI modalities and segmentation labels
-    t1c, t1n, t2f, t2w, label = [], [], [], [], []
-    
-    # Populate the lists with file paths
-    for i in range(len(file_paths)):
-        t1c.append(os.path.join(file_paths[i], file_names[i] + '-t1c.nii'))
-        t1n.append(os.path.join(file_paths[i], file_names[i] + '-t1n.nii'))
-        t2f.append(os.path.join(file_paths[i], file_names[i] + '-t2f.nii'))
-        t2w.append(os.path.join(file_paths[i], file_names[i] + '-t2w.nii'))
-        label.append(os.path.join(file_paths[i], file_names[i] + '-seg.nii'))
-    
-    # Store in a dictionary with combined image modalities and separate label
-    file_list = []
-    for i in range(len(file_paths)):
-        file_list.append({
-            "image": [t1c[i], t1n[i], t2f[i], t2w[i]],  # Combine modalities into one "image" field
-            "label": label[i]
-        })
-    
-    file_json = {
-        "training": file_list
+    # Create dataset.json structure
+    dataset = {
+        "name": "BraTS2023",
+        "description": "BraTS 2023 Training Dataset",
+        "reference": "https://www.synapse.org/#!Synapse:syn27046444/wiki/",
+        "licence": "https://www.synapse.org/#!Synapse:syn27046444/wiki/",
+        "tensorImageSize": "4D",
+        "modality": {
+            "0": "FLAIR",
+            "1": "T1w",
+            "2": "T1gd",
+            "3": "T2w"
+        },
+        "labels": {
+            "0": "background",
+            "1": "NCR",
+            "2": "ED",
+            "3": "ET"
+        },
+        "training": []
     }
     
-    # Save to JSON file
-    output_json_path = os.path.join(output_dir, "dataset.json")
-    with open(output_json_path, 'w') as json_file:
-        json.dump(file_json, json_file, indent=4)
+    # Process each case
+    for case_dir in case_dirs:
+        case_path = os.path.join(input_dir, case_dir)
+        
+        # Get image and label files
+        image_files = sorted([f for f in os.listdir(case_path) if f.endswith('.nii.gz') and not f.endswith('seg.nii.gz')])
+        label_file = [f for f in os.listdir(case_path) if f.endswith('seg.nii.gz')][0]
+        
+        # Create case entry
+        case_entry = {
+            "image": [os.path.join(case_path, f) for f in image_files],
+            "label": os.path.join(case_path, label_file)
+        }
+        dataset["training"].append(case_entry)
     
-    print(f"Created dataset.json at: {output_json_path}")
+    # Save dataset.json
+    dataset_path = os.path.join(output_dir, "dataset.json")
+    with open(dataset_path, 'w') as f:
+        json.dump(dataset, f, indent=2)
+    
     return output_dir
 
 def setup_kaggle_notebook():
@@ -81,10 +94,10 @@ def setup_kaggle_notebook():
     setup_kaggle_environment()
     
     # Prepare data
-    input_dir = '/kaggle/input/brats2023-part-1'
-    output_dir = '/kaggle/working'
+    input_dir = "/kaggle/input/brats2023-part-1"
+    output_dir = "/kaggle/working"
     
-    # Create dataset.json in the working directory
+    # Create dataset.json in working directory
     prepare_brats_data(input_dir, output_dir)
     
     return output_dir  # Return the directory path, not the file path
