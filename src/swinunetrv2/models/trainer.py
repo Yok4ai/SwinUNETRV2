@@ -33,9 +33,10 @@ def setup_training(train_ds, val_ds, max_epochs=30):
         train_loader,
         val_loader,
         max_epochs=max_epochs,
-        learning_rate=2e-4, 
-        decoder_embed_dim=256,  # SegFormer decoder embedding dimension
-        decoder_dropout=0.1     # SegFormer decoder dropout
+        learning_rate=2e-4,
+        embed_dim=32,  # Very small base dimension
+        depths=[1, 1, 2, 1],  # Minimal layers
+        decoder_embed_dim=96  # Medium decoder
         )
 
     # Setup trainer

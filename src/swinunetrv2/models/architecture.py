@@ -3,7 +3,6 @@ import time
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
-from monai.networks.nets import SwinUNETR
 from monai.losses import DiceLoss, DiceCELoss
 from monai.metrics import DiceMetric
 from monai.transforms import Compose, Activations, AsDiscrete
@@ -18,179 +17,344 @@ from torch.cuda.amp import GradScaler
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 from typing import Tuple, Union
+import math
+from einops import rearrange
 
 
-class SegFormerDecoder3D(nn.Module):
-    """
-    SegFormer-style decoder for 3D medical image segmentation.
-    Uses linear projections and upsampling instead of complex 3D convolutions.
-    """
+def window_partition(x, window_size):
+    """Partition into non-overlapping windows"""
+    B, D, H, W, C = x.shape
+    x = x.view(B, D // window_size, window_size, H // window_size, window_size, W // window_size, window_size, C)
+    windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, window_size, window_size, window_size, C)
+    return windows
+
+
+def window_reverse(windows, window_size, D, H, W):
+    """Reverse window partition"""
+    B = int(windows.shape[0] / (D * H * W / window_size / window_size / window_size))
+    x = windows.view(B, D // window_size, H // window_size, W // window_size, window_size, window_size, window_size, -1)
+    x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, D, H, W, -1)
+    return x
+
+
+class WindowAttention3D(nn.Module):
+    """Lightweight 3D Window Attention"""
+    def __init__(self, dim, window_size, num_heads, qkv_bias=True, attn_drop=0., proj_drop=0.):
+        super().__init__()
+        self.dim = dim
+        self.window_size = window_size
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = head_dim ** -0.5
+
+        # Lightweight QKV projection
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x):
+        B_, N, C = x.shape
+        qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        q = q * self.scale
+        attn = (q @ k.transpose(-2, -1))
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
+
+class SwinTransformerBlock3D(nn.Module):
+    """Lightweight Swin Transformer Block for 3D"""
+    def __init__(self, dim, num_heads, window_size=4, mlp_ratio=2., qkv_bias=True, drop=0., attn_drop=0.):
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.window_size = window_size
+        self.mlp_ratio = mlp_ratio
+
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = WindowAttention3D(
+            dim, window_size=window_size, num_heads=num_heads, qkv_bias=qkv_bias, 
+            attn_drop=attn_drop, proj_drop=drop
+        )
+
+        self.norm2 = nn.LayerNorm(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        # Lightweight MLP
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, mlp_hidden_dim),
+            nn.GELU(),
+            nn.Dropout(drop),
+            nn.Linear(mlp_hidden_dim, dim),
+            nn.Dropout(drop)
+        )
+
+    def forward(self, x, D, H, W):
+        B, L, C = x.shape
+
+        shortcut = x
+        x = self.norm1(x)
+        x = x.view(B, D, H, W, C)
+
+        # Window partition
+        x_windows = window_partition(x, self.window_size)
+        x_windows = x_windows.view(-1, self.window_size * self.window_size * self.window_size, C)
+
+        # W-MSA
+        attn_windows = self.attn(x_windows)
+
+        # Merge windows
+        attn_windows = attn_windows.view(-1, self.window_size, self.window_size, self.window_size, C)
+        x = window_reverse(attn_windows, self.window_size, D, H, W)
+        x = x.view(B, D * H * W, C)
+
+        # FFN
+        x = shortcut + x
+        x = x + self.mlp(self.norm2(x))
+
+        return x
+
+
+class PatchEmbedding3D(nn.Module):
+    """Lightweight 3D Patch Embedding"""
+    def __init__(self, patch_size=4, in_chans=4, embed_dim=48):
+        super().__init__()
+        self.patch_size = patch_size
+        self.in_chans = in_chans
+        self.embed_dim = embed_dim
+
+        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.norm = nn.LayerNorm(embed_dim)
+
+    def forward(self, x):
+        B, C, D, H, W = x.shape
+        x = self.proj(x)  # B, embed_dim, D//4, H//4, W//4
+        B, C, D, H, W = x.shape
+        x = x.flatten(2).transpose(1, 2)  # B, D*H*W, C
+        x = self.norm(x)
+        return x, (D, H, W)
+
+
+class PatchMerging3D(nn.Module):
+    """Lightweight patch merging for downsampling"""
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+        self.reduction = nn.Linear(8 * dim, 2 * dim, bias=False)  # 2x3D = 8 neighbors
+        self.norm = nn.LayerNorm(8 * dim)
+
+    def forward(self, x, D, H, W):
+        B, L, C = x.shape
+        
+        x = x.view(B, D, H, W, C)
+        
+        # Pad if needed
+        pad_input = (D % 2 == 1) or (H % 2 == 1) or (W % 2 == 1)
+        if pad_input:
+            x = torch.nn.functional.pad(x, (0, 0, 0, W % 2, 0, H % 2, 0, D % 2))
+            _, D, H, W, _ = x.shape
+
+        # Merge 2x2x2 patches
+        x0 = x[:, 0::2, 0::2, 0::2, :]  # B D/2 H/2 W/2 C
+        x1 = x[:, 1::2, 0::2, 0::2, :]  # B D/2 H/2 W/2 C
+        x2 = x[:, 0::2, 1::2, 0::2, :]  # B D/2 H/2 W/2 C
+        x3 = x[:, 1::2, 1::2, 0::2, :]  # B D/2 H/2 W/2 C
+        x4 = x[:, 0::2, 0::2, 1::2, :]  # B D/2 H/2 W/2 C
+        x5 = x[:, 1::2, 0::2, 1::2, :]  # B D/2 H/2 W/2 C
+        x6 = x[:, 0::2, 1::2, 1::2, :]  # B D/2 H/2 W/2 C
+        x7 = x[:, 1::2, 1::2, 1::2, :]  # B D/2 H/2 W/2 C
+        
+        x = torch.cat([x0, x1, x2, x3, x4, x5, x6, x7], -1)  # B D/2 H/2 W/2 8*C
+        x = x.view(B, -1, 8 * C)  # B D/2*H/2*W/2 8*C
+
+        x = self.norm(x)
+        x = self.reduction(x)
+
+        return x, (D // 2, H // 2, W // 2)
+
+
+class LightweightSwinEncoder3D(nn.Module):
+    """Ultra-lightweight Swin Transformer Encoder for 3D"""
     def __init__(
         self,
-        feature_dims: list = [768, 384, 192, 96],  # SwinUNETR feature dimensions
-        decoder_embed_dim: int = 256,
-        num_classes: int = 3,
-        dropout: float = 0.1
+        patch_size=4,
+        in_chans=4,
+        embed_dim=32,  # Much smaller base dimension
+        depths=[1, 1, 1, 1],  # Fewer layers
+        num_heads=[1, 2, 4, 8],  # Fewer heads
+        window_size=4,
+        mlp_ratio=2.,
+        qkv_bias=True,
+        drop_rate=0.,
+        attn_drop_rate=0.
     ):
         super().__init__()
         
-        # Linear projections for each feature level (step 1)
-        self.linear_c4 = self._make_linear_projection(feature_dims[0], decoder_embed_dim)
-        self.linear_c3 = self._make_linear_projection(feature_dims[1], decoder_embed_dim) 
-        self.linear_c2 = self._make_linear_projection(feature_dims[2], decoder_embed_dim)
-        self.linear_c1 = self._make_linear_projection(feature_dims[3], decoder_embed_dim)
+        self.patch_embed = PatchEmbedding3D(
+            patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim
+        )
         
-        # Fusion layer (step 3)
+        # Build layers
+        self.layers = nn.ModuleList()
+        for i_layer in range(len(depths)):
+            layer_dim = int(embed_dim * 2 ** i_layer)
+            layer = nn.ModuleList([
+                SwinTransformerBlock3D(
+                    dim=layer_dim,
+                    num_heads=num_heads[i_layer],
+                    window_size=window_size,
+                    mlp_ratio=mlp_ratio,
+                    qkv_bias=qkv_bias,
+                    drop=drop_rate,
+                    attn_drop=attn_drop_rate,
+                )
+                for _ in range(depths[i_layer])
+            ])
+            self.layers.append(layer)
+            
+            # Add patch merging except for the last layer
+            if i_layer < len(depths) - 1:
+                self.layers.append(PatchMerging3D(layer_dim))
+        
+        self.num_layers = len(depths)
+        self.embed_dim = embed_dim
+        
+    def forward(self, x):
+        # Patch embedding
+        x, (D, H, W) = self.patch_embed(x)
+        
+        features = []
+        dims = [(D, H, W)]
+        
+        layer_idx = 0
+        for i in range(self.num_layers):
+            # Transformer blocks
+            for blk in self.layers[layer_idx]:
+                x = blk(x, dims[-1][0], dims[-1][1], dims[-1][2])
+            
+            # Store feature for decoder
+            B, L, C = x.shape
+            D, H, W = dims[-1]
+            feature = x.view(B, D, H, W, C).permute(0, 4, 1, 2, 3).contiguous()
+            features.append(feature)
+            
+            layer_idx += 1
+            
+            # Patch merging (except last layer)
+            if i < self.num_layers - 1:
+                x, (D, H, W) = self.layers[layer_idx](x, dims[-1][0], dims[-1][1], dims[-1][2])
+                dims.append((D, H, W))
+                layer_idx += 1
+        
+        return features
+
+
+class SegFormerDecoder3D(nn.Module):
+    """Ultra-lightweight SegFormer-style decoder"""
+    def __init__(
+        self,
+        feature_dims=[32, 64, 128, 256],  # Much smaller dimensions
+        decoder_embed_dim=64,  # Reduced from 256
+        num_classes=3,
+        dropout=0.1
+    ):
+        super().__init__()
+        
+        # Lightweight linear projections
+        self.linear_c4 = nn.Conv3d(feature_dims[3], decoder_embed_dim, 1)
+        self.linear_c3 = nn.Conv3d(feature_dims[2], decoder_embed_dim, 1) 
+        self.linear_c2 = nn.Conv3d(feature_dims[1], decoder_embed_dim, 1)
+        self.linear_c1 = nn.Conv3d(feature_dims[0], decoder_embed_dim, 1)
+        
+        # Lightweight fusion
         self.linear_fuse = nn.Sequential(
-            nn.Conv3d(
-                in_channels=4 * decoder_embed_dim,
-                out_channels=decoder_embed_dim,
-                kernel_size=1,
-                stride=1,
-                bias=False,
-            ),
+            nn.Conv3d(4 * decoder_embed_dim, decoder_embed_dim, 1),
             nn.BatchNorm3d(decoder_embed_dim),
             nn.ReLU(inplace=True),
         )
         
         self.dropout = nn.Dropout3d(dropout)
+        self.classifier = nn.Conv3d(decoder_embed_dim, num_classes, 1)
         
-        # Final classification head (step 4)
-        self.classifier = nn.Conv3d(
-            decoder_embed_dim, 
-            num_classes, 
-            kernel_size=1
-        )
-        
-        # Upsampling to original resolution
-        self.final_upsample = nn.Upsample(
-            scale_factor=2.0,  # Adjust based on your input/output ratio
-            mode="trilinear", 
-            align_corners=False
-        )
-        
-    def _make_linear_projection(self, input_dim: int, output_dim: int):
-        """Create linear projection with layer norm"""
-        return nn.Sequential(
-            nn.Conv3d(input_dim, output_dim, kernel_size=1),
-            nn.BatchNorm3d(output_dim),
-            nn.ReLU(inplace=True)
-        )
-    
-    def forward(self, features: list):
-        """
-        Args:
-            features: List of feature maps from encoder [c1, c2, c3, c4]
-                     where c1 is highest resolution, c4 is lowest
-        """
+    def forward(self, features):
         c1, c2, c3, c4 = features
         
-        # Step 1: Linear projection to fixed dimension
+        # Linear projections
         _c4 = self.linear_c4(c4)
         _c3 = self.linear_c3(c3)  
         _c2 = self.linear_c2(c2)
         _c1 = self.linear_c1(c1)
         
-        # Step 2: Upsample all features to c1 size (highest resolution)
-        target_size = c1.size()[2:]  # (D, H, W)
+        # Upsample to c1 size
+        target_size = c1.size()[2:]
         
-        _c4 = torch.nn.functional.interpolate(
-            _c4, size=target_size, mode="trilinear", align_corners=False
-        )
-        _c3 = torch.nn.functional.interpolate(
-            _c3, size=target_size, mode="trilinear", align_corners=False  
-        )
-        _c2 = torch.nn.functional.interpolate(
-            _c2, size=target_size, mode="trilinear", align_corners=False
-        )
-        # _c1 is already at target size
+        _c4 = torch.nn.functional.interpolate(_c4, size=target_size, mode="trilinear", align_corners=False)
+        _c3 = torch.nn.functional.interpolate(_c3, size=target_size, mode="trilinear", align_corners=False)
+        _c2 = torch.nn.functional.interpolate(_c2, size=target_size, mode="trilinear", align_corners=False)
         
-        # Step 3: Concatenate and fuse
+        # Fuse features
         fused = self.linear_fuse(torch.cat([_c4, _c3, _c2, _c1], dim=1))
         fused = self.dropout(fused)
         
-        # Step 4: Generate segmentation masks
+        # Final classification
         output = self.classifier(fused)
-        output = self.final_upsample(output)
+        
+        # Upsample to original resolution (4x upsampling to match patch_size=4)
+        output = torch.nn.functional.interpolate(
+            output, scale_factor=4, mode="trilinear", align_corners=False
+        )
         
         return output
 
 
-class SwinUNETRWithSegFormerDecoder(nn.Module):
-    """
-    SwinUNETR encoder with SegFormer-style decoder for efficient 3D segmentation
-    """
+class LightweightSwinUNETR(nn.Module):
+    """Ultra-lightweight SwinUNETR with ~4M parameters"""
     def __init__(
         self,
-        in_channels: int = 4,
-        out_channels: int = 3,
-        feature_size: int = 48,
-        use_checkpoint: bool = True,
-        decoder_embed_dim: int = 256,
-        decoder_dropout: float = 0.1
+        patch_size=4,
+        in_channels=4,
+        out_channels=3,
+        embed_dim=32,  # Very small base dimension
+        depths=[1, 1, 1, 1],  # Minimal depth
+        num_heads=[1, 2, 4, 8],
+        window_size=4,
+        mlp_ratio=2.,
+        decoder_embed_dim=64,  # Small decoder
+        dropout=0.1
     ):
         super().__init__()
         
-        # Use SwinUNETR as encoder (extract features only)
-        self.encoder = SwinUNETR(
-            in_channels=in_channels,
-            out_channels=out_channels,  # We'll override this with our decoder
-            feature_size=feature_size,
-            use_checkpoint=use_checkpoint,
-            use_v2=True,
-            spatial_dims=3,
-            depths=(2, 2, 2, 2),
-            num_heads=(3, 6, 12, 24),
-            norm_name="instance",
-            drop_rate=0.0,
-            attn_drop_rate=0.0,
-            dropout_path_rate=0.0,
-            downsample="mergingv2"
+        # Lightweight encoder
+        self.encoder = LightweightSwinEncoder3D(
+            patch_size=patch_size,
+            in_chans=in_channels,
+            embed_dim=embed_dim,
+            depths=depths,
+            num_heads=num_heads,
+            window_size=window_size,
+            mlp_ratio=mlp_ratio,
         )
         
-        # Calculate feature dimensions based on feature_size
-        # SwinUNETR uses feature_size * (1, 2, 4, 8) for the four stages
-        feature_dims = [
-            feature_size,      # Stage 1
-            feature_size * 2,  # Stage 2  
-            feature_size * 4,  # Stage 3
-            feature_size * 8   # Stage 4
-        ]
+        # Calculate feature dimensions
+        feature_dims = [int(embed_dim * 2 ** i) for i in range(len(depths))]
         
-        # SegFormer-style decoder
+        # Lightweight decoder
         self.decoder = SegFormerDecoder3D(
-            feature_dims=feature_dims[::-1],  # Reverse order (c4, c3, c2, c1)
+            feature_dims=feature_dims,
             decoder_embed_dim=decoder_embed_dim,
             num_classes=out_channels,
-            dropout=decoder_dropout
+            dropout=dropout
         )
         
-    def extract_features(self, x):
-        """Extract multi-scale features from SwinUNETR encoder"""
-        # We need to modify this to extract intermediate features
-        # This is a simplified version - you may need to modify SwinUNETR source
-        # to properly extract intermediate features
-        
-        # For now, we'll use the existing SwinUNETR but this is not optimal
-        # Ideally, you'd modify the SwinUNETR to return intermediate features
-        hidden_states_out = self.encoder.swinViT(x, normalize=True)
-        
-        # Extract features at different scales
-        # Note: You might need to adjust these indices based on actual SwinUNETR implementation
-        enc0 = hidden_states_out[0]  # Highest resolution
-        enc1 = hidden_states_out[1] 
-        enc2 = hidden_states_out[2]
-        enc3 = hidden_states_out[3]  # Lowest resolution
-        
-        return [enc0, enc1, enc2, enc3]
-    
     def forward(self, x):
-        # Extract multi-scale features
-        features = self.extract_features(x)
-        
-        # Decode with SegFormer-style decoder
+        features = self.encoder(x)
         output = self.decoder(features)
-        
         return output
 
 
@@ -201,25 +365,25 @@ class BrainTumorSegmentation(pl.LightningModule):
         val_loader, 
         max_epochs=100, 
         val_interval=1, 
-        learning_rate=1e-4,
-        feature_size=48,
-        decoder_embed_dim=256,
-        decoder_dropout=0.1
+        learning_rate=1e-3,  # Higher LR for smaller model
+        embed_dim=32,
+        depths=[1, 1, 1, 1],
+        decoder_embed_dim=64
     ):
         super().__init__()
         self.save_hyperparameters()
         
-        # Initialize model with SegFormer decoder
-        self.model = SwinUNETRWithSegFormerDecoder(
+        # Ultra-lightweight model
+        self.model = LightweightSwinUNETR(
             in_channels=4,
             out_channels=3,
-            feature_size=feature_size,
-            use_checkpoint=True,
+            embed_dim=embed_dim,
+            depths=depths,
             decoder_embed_dim=decoder_embed_dim,
-            decoder_dropout=decoder_dropout
+            dropout=0.1
         )
         
-        # Loss and metrics (same as before)
+        # Loss and metrics
         self.loss_function = DiceLoss(
             smooth_nr=0, 
             smooth_dr=1e-5, 
@@ -258,39 +422,30 @@ class BrainTumorSegmentation(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         inputs, labels = batch["image"], batch["label"]
 
-        # Forward pass
         outputs = self(inputs)
         loss = self.loss_function(outputs, labels)
         
-        # Log the Train Loss
         self.log("train_loss", loss, prog_bar=True)
 
-        # Apply sigmoid and threshold (same as validation)
         outputs = [self.post_trans(i) for i in decollate_batch(outputs)]
         
-        # Compute Dice
         self.dice_metric(y_pred=outputs, y=labels)
         self.dice_metric_batch(y_pred=outputs, y=labels)
 
-        # Log Train Dice 
         train_dice = self.dice_metric.aggregate().item()
         self.log("train_mean_dice", train_dice, prog_bar=True)
 
-        # Store Mean Dice
         self.train_metric_values.append(train_dice)
 
-        # Store the individual dice
         metric_batch = self.dice_metric_batch.aggregate()
         self.train_metric_values_tc.append(metric_batch[0].item())
         self.train_metric_values_wt.append(metric_batch[1].item())
         self.train_metric_values_et.append(metric_batch[2].item())
 
-        # Log the individual dice metrics
         self.log("train_tc", metric_batch[0].item(), prog_bar=True)
         self.log("train_wt", metric_batch[1].item(), prog_bar=True)
         self.log("train_et", metric_batch[2].item(), prog_bar=True)
 
-        # Reset metrics for the next epoch
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
 
@@ -300,7 +455,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         train_loss = self.trainer.logged_metrics["train_loss"].item()
         self.train_loss_values.append(train_loss)
         
-        # Calculate and store average loss per epoch
         avg_train_loss = sum(self.train_loss_values) / len(self.train_loss_values)
         self.log("avg_train_loss", avg_train_loss, prog_bar=True)
         self.avg_train_loss_values.append(avg_train_loss)
@@ -308,52 +462,43 @@ class BrainTumorSegmentation(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
         
-        # Use sliding window inference for validation
         val_outputs = sliding_window_inference(
             val_inputs, 
             roi_size=(96, 96, 96), 
             sw_batch_size=1, 
-            predictor=self.model,  # Use our custom model
+            predictor=self.model,
             overlap=0.5
         )
         
-        # Compute loss
         val_loss = self.loss_function(val_outputs, val_labels)
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True)
         
         val_outputs = [self.post_trans(i) for i in decollate_batch(val_outputs)]    
         
-        # Compute Dice
         self.dice_metric(y_pred=val_outputs, y=val_labels)
         self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
     
-        # Log validation Dice
         val_dice = self.dice_metric.aggregate().item()
         self.log("val_mean_dice", val_dice, prog_bar=True)
     
         return {"val_loss": val_loss}
 
     def on_validation_epoch_end(self):
-        # Store Dice Mean
         val_dice = self.dice_metric.aggregate().item()
         self.metric_values.append(val_dice)
 
-        # Store Validation Loss 
         val_loss = self.trainer.logged_metrics["val_loss"].item()
         self.epoch_loss_values.append(val_loss)
 
-        # Calculate and Store avg val loss values
         avg_val_loss = sum(self.epoch_loss_values) / len(self.epoch_loss_values)
         self.log("avg_val_loss", avg_val_loss, prog_bar=True)
         self.avg_val_loss_values.append(avg_val_loss)
 
-        # Store Individual Dice
         metric_batch = self.dice_metric_batch.aggregate()
         self.metric_values_tc.append(metric_batch[0].item())
         self.metric_values_wt.append(metric_batch[1].item())
         self.metric_values_et.append(metric_batch[2].item())
 
-        # Log validation metrics
         self.log("val_loss", val_loss, prog_bar=True)
         self.log("val_mean_dice", val_dice, prog_bar=True)
         self.log("val_tc", metric_batch[0].item(), prog_bar=True)
@@ -363,44 +508,80 @@ class BrainTumorSegmentation(pl.LightningModule):
         if val_dice > self.best_metric:
             self.best_metric = val_dice
             self.best_metric_epoch = self.current_epoch
-            torch.save(self.model.state_dict(), "best_metric_model_swinunetr_segformer.pth")
+            torch.save(self.model.state_dict(), "best_metric_model_lightweight_swinunetr.pth")
             self.log("best_metric", self.best_metric)
     
-        # Reset metrics for the next epoch
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
 
     def on_train_end(self):
-        # Print the best metric and epoch along with individual Dice scores at the end of training
         print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}, "
               f"tc: {self.metric_values_tc[-1]:.4f}, "
               f"wt: {self.metric_values_wt[-1]:.4f}, "
               f"et: {self.metric_values_et[-1]:.4f}.")
 
     def configure_optimizers(self):
-        # Slightly higher learning rate for the new architecture
         optimizer = AdamW(
             self.model.parameters(), 
             lr=self.hparams.learning_rate, 
-            weight_decay=1e-5
+            weight_decay=1e-4  # Slightly higher weight decay for small model
         )
         
         scheduler = CosineAnnealingLR(optimizer, T_max=self.hparams.max_epochs)
         return [optimizer], [scheduler]
 
 
-# Example usage and configuration
-# def create_model_with_segformer_decoder(train_loader, val_loader):
+def count_parameters(model):
+    """Count model parameters"""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+# def create_lightweight_model(train_loader, val_loader):
 #     """
-#     Factory function to create the model with optimized parameters
+#     Create ultra-lightweight model with ~4M parameters
 #     """
 #     model = BrainTumorSegmentation(
 #         train_loader=train_loader,
 #         val_loader=val_loader,
 #         max_epochs=100,
-#         learning_rate=2e-4,  # Slightly higher LR for the new architecture
-#         feature_size=48,
-#         decoder_embed_dim=256,  # SegFormer decoder embedding dimension
-#         decoder_dropout=0.1
+#         learning_rate=1e-3,  # Higher LR for smaller model
+#         embed_dim=32,  # Very small base dimension
+#         depths=[1, 1, 1, 1],  # Minimal layers
+#         decoder_embed_dim=64  # Small decoder
 #     )
+    
+#     param_count = count_parameters(model.model)
+#     model_size_mb = param_count * 4 / (1024 * 1024)  # Assuming float32
+    
+#     print(f"Model Parameter Count: {param_count / 1e6:.2f}M")
+#     print(f"Model Size: {model_size_mb:.2f} MB")
+    
 #     return model
+
+
+# # Usage example with parameter variants
+# def create_model_variants():
+#     """Different model sizes for experimentation"""
+    
+#     # Ultra-light: ~2-3M params
+#     ultra_light_config = {
+#         'embed_dim': 24,
+#         'depths': [1, 1, 1, 1],
+#         'decoder_embed_dim': 48
+#     }
+    
+#     # Light: ~4-5M params  
+#     light_config = {
+#         'embed_dim': 32,
+#         'depths': [1, 1, 1, 1], 
+#         'decoder_embed_dim': 64
+#     }
+    
+#     # Medium: ~6-8M params
+#     medium_config = {
+#         'embed_dim': 32,
+#         'depths': [1, 1, 2, 1],
+#         'decoder_embed_dim': 96
+#     }
+    
+#     return ultra_light_config, light_config, medium_config
