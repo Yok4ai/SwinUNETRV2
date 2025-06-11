@@ -14,7 +14,7 @@ args = argparse.Namespace(
     batch_size=8,
     num_workers=4,
     pin_memory=True,
-    persistent_workers=True,
+    persistent_workers=False,  # Disabled to fix pickling error
     
     # Model parameters
     img_size=128,
