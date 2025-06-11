@@ -44,10 +44,12 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
 
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
+
         
         self.best_metric = -1
         self.train_loader = train_loader
         self.val_loader = val_loader
+
 
         # Training metrics
         self.avg_train_loss_values = []
@@ -80,6 +82,7 @@ class BrainTumorSegmentation(pl.LightningModule):
 
         # Apply sigmoid and threshold (same as validation)
         outputs = [self.post_trans(i) for i in decollate_batch(outputs)]
+        # outputs_tensor = torch.stack(outputs)  # Convert back to a tensor
         
         # Compute Dice
         self.dice_metric(y_pred=outputs, y=labels)
@@ -138,7 +141,8 @@ class BrainTumorSegmentation(pl.LightningModule):
         val_dice = self.dice_metric.aggregate().item()
         self.log("val_mean_dice", val_dice, prog_bar=True)
     
-        return {"val_loss": val_loss}
+        return {"val_loss": val_loss}  # Return val_loss to be used in aggregation
+
 
     def on_validation_epoch_end(self):
         # Store Dice Mean
@@ -146,6 +150,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.metric_values.append(val_dice)
 
         # Store Validation Loss 
+        # val_loss = self.trainer.logged_metrics.get("val_loss", torch.tensor(0.0))
         val_loss = self.trainer.logged_metrics["val_loss"].item()
         self.epoch_loss_values.append(val_loss)
 
