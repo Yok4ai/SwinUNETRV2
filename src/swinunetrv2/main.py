@@ -7,6 +7,10 @@ from swinunetrv2.data.augmentations import get_transforms
 from swinunetrv2.data.dataloader import get_dataloaders
 from swinunetrv2.models.trainer import setup_training, train_model
 
+def count_parameters(model):
+    """Count the number of trainable parameters in the model"""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 def main(args):
     # Step 1: Setup MONAI transforms
     print("Step 1: Setting up MONAI transforms...")
@@ -28,6 +32,11 @@ def main(args):
         val_ds=val_ds,
         max_epochs=args.epochs
     )
+    
+    # Print model parameter count
+    total_params = count_parameters(model)
+    print(f"\nModel Parameter Count: {total_params/1e6:.2f}M")
+    print(f"Model Size: {total_params * 4 / (1024 * 1024):.2f} MB\n")
     
     # Step 4: Train model
     print("Step 4: Starting training...")
