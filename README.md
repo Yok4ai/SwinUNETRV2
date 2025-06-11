@@ -4,6 +4,22 @@ A PyTorch implementation of SwinUNETR V2 for medical image segmentation.
 
 ## Installation
 
+### On Kaggle
+
+Simply install the package from GitHub:
+
+```python
+!pip install git+https://github.com/yourusername/swinunetrv2.git
+```
+
+This will automatically install all required dependencies including:
+- MONAI with nibabel, tqdm, and einops
+- Matplotlib
+- Einops
+- And other required packages
+
+### Local Installation
+
 ```bash
 pip install -e .
 ```
@@ -36,20 +52,12 @@ The code follows this sequence:
 
 ### Running on Kaggle
 
-1. Install the package in your Kaggle notebook:
+1. Install the package:
 ```python
 !pip install git+https://github.com/yourusername/swinunetrv2.git
 ```
 
-2. Setup the environment and prepare data:
-```python
-from swinunetrv2.kaggle_setup import setup_kaggle_notebook
-
-# This will install required packages and prepare the dataset
-dataset_json_path = setup_kaggle_notebook()
-```
-
-3. Run the training pipeline:
+2. Run the training:
 ```python
 from swinunetrv2.main import main
 import argparse

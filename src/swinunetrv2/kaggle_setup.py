@@ -3,18 +3,34 @@ import glob
 import json
 import subprocess
 import sys
+import matplotlib.pyplot as plt
 
 def setup_kaggle_environment():
     """Setup the required environment for Kaggle."""
-    # Install required packages
-    packages = [
-        "monai-weekly[nibabel, tqdm, einops]",
-        "matplotlib",
-        "einops"
-    ]
+    # Install MONAI with specific dependencies
+    subprocess.check_call([
+        sys.executable, "-c",
+        "import monai" if subprocess.run([sys.executable, "-c", "import monai"]).returncode == 0
+        else "import sys; subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'monai-weekly[nibabel, tqdm, einops]'])"
+    ])
     
-    for package in packages:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", package])
+    # Install matplotlib if not present
+    subprocess.check_call([
+        sys.executable, "-c",
+        "import matplotlib" if subprocess.run([sys.executable, "-c", "import matplotlib"]).returncode == 0
+        else "import sys; subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'matplotlib'])"
+    ])
+    
+    # Install einops
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "einops"])
+    
+    # Set matplotlib to inline mode
+    plt.rcParams['figure.figsize'] = [12, 8]
+    plt.style.use('seaborn')
+    
+    # Print installed versions
+    print("Environment setup complete. Installed packages:")
+    subprocess.check_call([sys.executable, "-m", "pip", "list", "|", "grep", "-E", "monai|matplotlib|einops"])
 
 def prepare_brats_data(input_dir, output_json_path):
     """Prepare BraTS data and create dataset.json file."""
