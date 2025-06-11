@@ -58,7 +58,7 @@ def window_reverse(windows, window_size, D, H, W):
     
     # Remove padding if it was added
     if pad_d > 0 or pad_h > 0 or pad_w > 0:
-        x = x[:, :D, :H, :W, :]
+        x = x[:, :D, :H, :W, :].contiguous()  # Add contiguous() here
         
     return x
 
@@ -141,7 +141,9 @@ class SwinTransformerBlock3D(nn.Module):
         # Merge windows (with automatic padding removal)
         attn_windows = attn_windows.view(-1, self.window_size, self.window_size, self.window_size, C)
         x = window_reverse(attn_windows, self.window_size, original_D, original_H, original_W)
-        x = x.view(B, original_D * original_H * original_W, C)
+        
+        # FIX: Use reshape instead of view for non-contiguous tensors
+        x = x.reshape(B, original_D * original_H * original_W, C)
 
         # FFN
         x = shortcut + x
@@ -203,7 +205,8 @@ class PatchMerging3D(nn.Module):
         x7 = x[:, 1::2, 1::2, 1::2, :]  # B D/2 H/2 W/2 C
         
         x = torch.cat([x0, x1, x2, x3, x4, x5, x6, x7], -1)  # B D/2 H/2 W/2 8*C
-        x = x.view(B, -1, 8 * C)  # B D/2*H/2*W/2 8*C
+        # FIX: Use reshape instead of view
+        x = x.reshape(B, -1, 8 * C)  # B D/2*H/2*W/2 8*C
 
         x = self.norm(x)
         x = self.reduction(x)
@@ -273,7 +276,8 @@ class LightweightSwinEncoder3D(nn.Module):
             # Store feature for decoder
             B, L, C = x.shape
             D, H, W = dims[-1]
-            feature = x.view(B, D, H, W, C).permute(0, 4, 1, 2, 3).contiguous()
+            # FIX: Use reshape and ensure contiguous
+            feature = x.reshape(B, D, H, W, C).permute(0, 4, 1, 2, 3).contiguous()
             features.append(feature)
             
             layer_idx += 1
@@ -349,7 +353,6 @@ class LightweightSwinUNETR(nn.Module):
     """Ultra-lightweight SwinUNETR with ~4M parameters"""
     def __init__(
         self,
-        img_size=(96, 96, 96),
         patch_size=4,
         in_channels=4,
         out_channels=3,
@@ -390,6 +393,10 @@ class LightweightSwinUNETR(nn.Module):
         output = self.decoder(features)
         return output
 
+    def count_parameters(self):
+        """Count total number of trainable parameters"""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
 
 class BrainTumorSegmentation(pl.LightningModule):
     def __init__(
@@ -399,7 +406,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         max_epochs=100, 
         val_interval=1, 
         learning_rate=1e-3,  # Higher LR for smaller model
-        img_size=(96, 96, 96),
         embed_dim=32,
         depths=[1, 1, 1, 1],
         decoder_embed_dim=64
@@ -409,7 +415,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         
         # Ultra-lightweight model
         self.model = LightweightSwinUNETR(
-            img_size=img_size,
             in_channels=4,
             out_channels=3,
             embed_dim=embed_dim,
@@ -417,6 +422,10 @@ class BrainTumorSegmentation(pl.LightningModule):
             decoder_embed_dim=decoder_embed_dim,
             dropout=0.1
         )
+        
+        # Print model size
+        total_params = self.model.count_parameters()
+        print(f"🚀 Model initialized with {total_params:,} parameters ({total_params/1e6:.2f}M)")
         
         # Loss and metrics
         self.loss_function = DiceLoss(
@@ -566,53 +575,52 @@ class BrainTumorSegmentation(pl.LightningModule):
         return [optimizer], [scheduler]
 
 
+# Memory-efficient model test function
+def test_model_memory():
+    """Test the model with a small input to verify it works"""
+    print("🧪 Testing model memory and functionality...")
+    
+    # Create a small test input
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    test_input = torch.randn(1, 4, 96, 96, 96).to(device)
+    
+    # Create model
+    model = LightweightSwinUNETR(
+        embed_dim=32,
+        depths=[1, 1, 1, 1],
+        decoder_embed_dim=64
+    ).to(device)
+    
+    # Count parameters
+    total_params = model.count_parameters()
+    print(f"✅ Model has {total_params:,} parameters ({total_params/1e6:.2f}M)")
+    
+    # Test forward pass
+    model.eval()
+    with torch.no_grad():
+        try:
+            output = model(test_input)
+            print(f"✅ Forward pass successful!")
+            print(f"   Input shape: {test_input.shape}")
+            print(f"   Output shape: {output.shape}")
+            
+            # Check memory usage
+            if torch.cuda.is_available():
+                memory_used = torch.cuda.max_memory_allocated() / 1024**3  # GB
+                print(f"   GPU memory used: {memory_used:.2f} GB")
+                torch.cuda.reset_peak_memory_stats()
+                
+        except Exception as e:
+            print(f"❌ Forward pass failed: {e}")
+            return False
+    
+    return True
 
-# def create_lightweight_model(train_loader, val_loader):
-#     """
-#     Create ultra-lightweight model with ~4M parameters
-#     """
-#     model = BrainTumorSegmentation(
-#         train_loader=train_loader,
-#         val_loader=val_loader,
-#         max_epochs=100,
-#         learning_rate=1e-3,  # Higher LR for smaller model
-#         embed_dim=32,  # Very small base dimension
-#         depths=[1, 1, 1, 1],  # Minimal layers
-#         decoder_embed_dim=64  # Small decoder
-#     )
-    
-#     param_count = count_parameters(model.model)
-#     model_size_mb = param_count * 4 / (1024 * 1024)  # Assuming float32
-    
-#     print(f"Model Parameter Count: {param_count / 1e6:.2f}M")
-#     print(f"Model Size: {model_size_mb:.2f} MB")
-    
-#     return model
 
-
-# # Usage example with parameter variants
-# def create_model_variants():
-#     """Different model sizes for experimentation"""
-    
-#     # Ultra-light: ~2-3M params
-#     ultra_light_config = {
-#         'embed_dim': 24,
-#         'depths': [1, 1, 1, 1],
-#         'decoder_embed_dim': 48
-#     }
-    
-#     # Light: ~4-5M params  
-#     light_config = {
-#         'embed_dim': 32,
-#         'depths': [1, 1, 1, 1], 
-#         'decoder_embed_dim': 64
-#     }
-    
-#     # Medium: ~6-8M params
-#     medium_config = {
-#         'embed_dim': 32,
-#         'depths': [1, 1, 2, 1],
-#         'decoder_embed_dim': 96
-#     }
-    
-#     return ultra_light_config, light_config, medium_config
+if __name__ == "__main__":
+    # Test the model
+    success = test_model_memory()
+    if success:
+        print("🎉 Model is ready for training!")
+    else:
+        print("💥 Model needs debugging before training.")
