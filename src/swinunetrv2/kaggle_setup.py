@@ -85,9 +85,9 @@ def setup_kaggle_notebook():
     output_dir = '/kaggle/working'
     
     # Create dataset.json in the working directory
-    output_dir = prepare_brats_data(input_dir, output_dir)
+    prepare_brats_data(input_dir, output_dir)
     
-    return output_dir
+    return output_dir  # Return the directory path, not the file path
 
 if __name__ == "__main__":
     output_dir = setup_kaggle_notebook()
