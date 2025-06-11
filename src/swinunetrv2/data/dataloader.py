@@ -25,7 +25,7 @@ def get_dataloaders(data_dir, batch_size, train_transforms, val_transforms):
         tuple: (train_dataset, val_dataset)
     """
     # Load dataset
-    dataset_path = os.path.join(data_dir, "dataset.json")
+    dataset_path = data_dir if data_dir.endswith('dataset.json') else os.path.join(data_dir, "dataset.json")
     with open(dataset_path) as f:
         datalist = json.load(f)["training"]
     
