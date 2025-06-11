@@ -30,7 +30,7 @@ def main(args):
     model, trainer, train_loader, val_loader = setup_training(
         train_ds=train_ds,
         val_ds=val_ds,
-        max_epochs=args.epochs
+        args=args
     )
     
     # Print model parameter count
