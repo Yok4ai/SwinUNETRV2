@@ -22,18 +22,44 @@ from einops import rearrange
 
 
 def window_partition(x, window_size):
-    """Partition into non-overlapping windows"""
+    """Partition into non-overlapping windows with padding if needed"""
     B, D, H, W, C = x.shape
+    
+    # Calculate padding needed
+    pad_d = (window_size - D % window_size) % window_size
+    pad_h = (window_size - H % window_size) % window_size
+    pad_w = (window_size - W % window_size) % window_size
+    
+    # Apply padding if needed
+    if pad_d > 0 or pad_h > 0 or pad_w > 0:
+        x = torch.nn.functional.pad(x, (0, 0, 0, pad_w, 0, pad_h, 0, pad_d))
+        
+    B, D, H, W, C = x.shape  # Update dimensions after padding
+    
     x = x.view(B, D // window_size, window_size, H // window_size, window_size, W // window_size, window_size, C)
     windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, window_size, window_size, window_size, C)
     return windows
 
 
 def window_reverse(windows, window_size, D, H, W):
-    """Reverse window partition"""
-    B = int(windows.shape[0] / (D * H * W / window_size / window_size / window_size))
-    x = windows.view(B, D // window_size, H // window_size, W // window_size, window_size, window_size, window_size, -1)
-    x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, D, H, W, -1)
+    """Reverse window partition and remove padding"""
+    # Calculate padded dimensions
+    pad_d = (window_size - D % window_size) % window_size
+    pad_h = (window_size - H % window_size) % window_size
+    pad_w = (window_size - W % window_size) % window_size
+    
+    D_pad = D + pad_d
+    H_pad = H + pad_h
+    W_pad = W + pad_w
+    
+    B = int(windows.shape[0] / (D_pad * H_pad * W_pad / window_size / window_size / window_size))
+    x = windows.view(B, D_pad // window_size, H_pad // window_size, W_pad // window_size, window_size, window_size, window_size, -1)
+    x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, D_pad, H_pad, W_pad, -1)
+    
+    # Remove padding if it was added
+    if pad_d > 0 or pad_h > 0 or pad_w > 0:
+        x = x[:, :D, :H, :W, :]
+        
     return x
 
 
@@ -102,17 +128,20 @@ class SwinTransformerBlock3D(nn.Module):
         x = self.norm1(x)
         x = x.view(B, D, H, W, C)
 
-        # Window partition
+        # Store original dimensions for padding removal
+        original_D, original_H, original_W = D, H, W
+
+        # Window partition (with automatic padding)
         x_windows = window_partition(x, self.window_size)
         x_windows = x_windows.view(-1, self.window_size * self.window_size * self.window_size, C)
 
         # W-MSA
         attn_windows = self.attn(x_windows)
 
-        # Merge windows
+        # Merge windows (with automatic padding removal)
         attn_windows = attn_windows.view(-1, self.window_size, self.window_size, self.window_size, C)
-        x = window_reverse(attn_windows, self.window_size, D, H, W)
-        x = x.view(B, D * H * W, C)
+        x = window_reverse(attn_windows, self.window_size, original_D, original_H, original_W)
+        x = x.view(B, original_D * original_H * original_W, C)
 
         # FFN
         x = shortcut + x
@@ -142,7 +171,7 @@ class PatchEmbedding3D(nn.Module):
 
 
 class PatchMerging3D(nn.Module):
-    """Lightweight patch merging for downsampling"""
+    """Lightweight patch merging for downsampling with robust padding"""
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
@@ -154,11 +183,14 @@ class PatchMerging3D(nn.Module):
         
         x = x.view(B, D, H, W, C)
         
-        # Pad if needed
-        pad_input = (D % 2 == 1) or (H % 2 == 1) or (W % 2 == 1)
-        if pad_input:
-            x = torch.nn.functional.pad(x, (0, 0, 0, W % 2, 0, H % 2, 0, D % 2))
-            _, D, H, W, _ = x.shape
+        # Always pad to ensure even dimensions
+        pad_d = D % 2
+        pad_h = H % 2  
+        pad_w = W % 2
+        
+        if pad_d or pad_h or pad_w:
+            x = torch.nn.functional.pad(x, (0, 0, 0, pad_w, 0, pad_h, 0, pad_d))
+            D, H, W = D + pad_d, H + pad_h, W + pad_w
 
         # Merge 2x2x2 patches
         x0 = x[:, 0::2, 0::2, 0::2, :]  # B D/2 H/2 W/2 C
@@ -317,6 +349,7 @@ class LightweightSwinUNETR(nn.Module):
     """Ultra-lightweight SwinUNETR with ~4M parameters"""
     def __init__(
         self,
+        img_size=(96, 96, 96),
         patch_size=4,
         in_channels=4,
         out_channels=3,
@@ -366,6 +399,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         max_epochs=100, 
         val_interval=1, 
         learning_rate=1e-3,  # Higher LR for smaller model
+        img_size=(96, 96, 96),
         embed_dim=32,
         depths=[1, 1, 1, 1],
         decoder_embed_dim=64
@@ -375,6 +409,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         
         # Ultra-lightweight model
         self.model = LightweightSwinUNETR(
+            img_size=img_size,
             in_channels=4,
             out_channels=3,
             embed_dim=embed_dim,
@@ -530,10 +565,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         scheduler = CosineAnnealingLR(optimizer, T_max=self.hparams.max_epochs)
         return [optimizer], [scheduler]
 
-
-def count_parameters(model):
-    """Count model parameters"""
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 # def create_lightweight_model(train_loader, val_loader):
