@@ -11,6 +11,7 @@ from monai.transforms import (
     RandShiftIntensityd,
     EnsureTyped,
 )
+from swinunetrv2.utils.convert_labels import ConvertLabels
 
 def get_transforms(img_size=96):
     """Get training and validation transforms for BraTS data."""
@@ -27,6 +28,7 @@ def get_transforms(img_size=96):
         RandScaleIntensityd(keys="image", factors=0.1, prob=0.5),
         RandShiftIntensityd(keys="image", offsets=0.1, prob=0.5),
         EnsureTyped(keys=["image", "label"]),
+        ConvertLabels(keys=["label"]),
     ])
     
     val_transforms = Compose([
@@ -36,6 +38,7 @@ def get_transforms(img_size=96):
         Spacingd(keys=["image", "label"], pixdim=(1.5, 1.5, 2.0), mode=("bilinear", "nearest")),
         NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
         EnsureTyped(keys=["image", "label"]),
+        ConvertLabels(keys=["label"]),
     ])
     
     return train_transforms, val_transforms

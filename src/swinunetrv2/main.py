@@ -3,47 +3,41 @@ import argparse
 import torch
 from monai.data import DataLoader, decollate_batch
 
-from swinunetrv2.utils.convert_labels import convert_labels
 from swinunetrv2.data.augmentations import get_transforms
 from swinunetrv2.data.dataloader import get_dataloaders
 from swinunetrv2.models.trainer import setup_training, train_model
 
 def main(args):
-    # Step 1: Convert labels and prepare data
-    print("Step 1: Converting labels and preparing data...")
-    convert_labels(args.input_dir, args.output_dir)
-    
-    # Step 2: Setup MONAI transforms
-    print("Step 2: Setting up MONAI transforms...")
+    # Step 1: Setup MONAI transforms
+    print("Step 1: Setting up MONAI transforms...")
     train_transforms, val_transforms = get_transforms(img_size=args.img_size)
     
-    # Step 3: Create dataloaders
-    print("Step 3: Creating dataloaders...")
+    # Step 2: Create dataloaders
+    print("Step 2: Creating dataloaders...")
     train_ds, val_ds = get_dataloaders(
-        data_dir=args.output_dir,
+        data_dir=args.input_dir,
         batch_size=args.batch_size,
         train_transforms=train_transforms,
         val_transforms=val_transforms
     )
     
-    # Step 4: Setup training and initialize model
-    print("Step 4: Setting up training...")
+    # Step 3: Setup training and initialize model
+    print("Step 3: Setting up training...")
     model, trainer, train_loader, val_loader = setup_training(
         train_ds=train_ds,
         val_ds=val_ds,
         max_epochs=args.epochs
     )
     
-    # Step 5: Train model
-    print("Step 5: Starting training...")
+    # Step 4: Train model
+    print("Step 4: Starting training...")
     train_model(model, trainer, train_loader, val_loader)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SwinUNETR V2 Training Pipeline")
     
     # Data parameters
-    parser.add_argument("--input_dir", type=str, required=True, help="Input directory containing raw data")
-    parser.add_argument("--output_dir", type=str, required=True, help="Output directory for processed data")
+    parser.add_argument("--input_dir", type=str, required=True, help="Input directory containing data")
     parser.add_argument("--batch_size", type=int, default=2, help="Batch size for training")
     
     # Model parameters

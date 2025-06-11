@@ -1,11 +1,14 @@
+import torch
+from monai.transforms import MapTransform
+
 class ConvertLabels(MapTransform):
     """
-#     Convert labels to multi channels based on BRATS 2023 classes:
-#     label 1 is Necrotic Tumor Core (NCR)
-#     label 2 is Edema (ED)
-#     label 3 is Enhancing Tumor (ET)
-#     label 0 is everything else (non-tumor)
-#     """
+    Convert labels to multi channels based on BRATS 2023 classes:
+    label 1 is Necrotic Tumor Core (NCR)
+    label 2 is Edema (ED)
+    label 3 is Enhancing Tumor (ET)
+    label 0 is everything else (non-tumor)
+    """
 
     def __call__(self, data):
         d = dict(data)
