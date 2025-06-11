@@ -38,23 +38,4 @@ def get_dataloaders(data_dir, batch_size, train_transforms, val_transforms):
     train_ds = Dataset(data=train_files, transform=train_transforms)
     val_ds = Dataset(data=val_files, transform=val_transforms)
     
-    return train_ds, val_ds
-
-# Set deterministic behavior
-set_determinism(seed=0)
-
-cache_dir = "/kaggle/working/cache"
-
-
-train_transform = train_transform
-val_transform = val_transform
-
-# Create MONAI datasets
-
-train_ds, val_ds = get_dataloaders("/kaggle/working", 2, train_transform, val_transform)
-# train_ds = PersistentDataset(data=train_files, transform=train_transform, cache_dir=cache_dir)
-
-
-# Dataloaders
-train_loader = DataLoader(train_ds, batch_size=2, shuffle=True, num_workers=3, pin_memory=True, persistent_workers=False)
-val_loader = DataLoader(val_ds, batch_size=1, shuffle=False, num_workers=3, pin_memory=True, persistent_workers=False)
+    return train_ds, val_ds 
