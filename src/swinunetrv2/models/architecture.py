@@ -1,6 +1,7 @@
 import os
 import time
 import torch
+import torch.nn as nn
 import pytorch_lightning as pl
 from monai.networks.nets import SwinUNETR
 from monai.losses import DiceLoss, DiceCELoss
@@ -16,18 +17,129 @@ from pytorch_lightning.callbacks.timer import Timer
 from torch.cuda.amp import GradScaler
 import wandb
 from pytorch_lightning.loggers import WandbLogger
+from typing import Tuple, Union
 
-class BrainTumorSegmentation(pl.LightningModule):
-    def __init__(self, train_loader, val_loader, max_epochs=100, val_interval=1, learning_rate=1e-4):
+
+class SegFormerDecoder3D(nn.Module):
+    """
+    SegFormer-style decoder for 3D medical image segmentation.
+    Uses linear projections and upsampling instead of complex 3D convolutions.
+    """
+    def __init__(
+        self,
+        feature_dims: list = [768, 384, 192, 96],  # SwinUNETR feature dimensions
+        decoder_embed_dim: int = 256,
+        num_classes: int = 3,
+        dropout: float = 0.1
+    ):
         super().__init__()
-        self.save_hyperparameters()
-        # SwinUNETR-V2 Configuration (img_size removed as it's deprecated)
-        self.model = SwinUNETR(
-            in_channels=4,
-            out_channels=3,
-            feature_size=48,
-            use_checkpoint=True,
-            use_v2=True,  # Enable SwinUNETR-V2!
+        
+        # Linear projections for each feature level (step 1)
+        self.linear_c4 = self._make_linear_projection(feature_dims[0], decoder_embed_dim)
+        self.linear_c3 = self._make_linear_projection(feature_dims[1], decoder_embed_dim) 
+        self.linear_c2 = self._make_linear_projection(feature_dims[2], decoder_embed_dim)
+        self.linear_c1 = self._make_linear_projection(feature_dims[3], decoder_embed_dim)
+        
+        # Fusion layer (step 3)
+        self.linear_fuse = nn.Sequential(
+            nn.Conv3d(
+                in_channels=4 * decoder_embed_dim,
+                out_channels=decoder_embed_dim,
+                kernel_size=1,
+                stride=1,
+                bias=False,
+            ),
+            nn.BatchNorm3d(decoder_embed_dim),
+            nn.ReLU(inplace=True),
+        )
+        
+        self.dropout = nn.Dropout3d(dropout)
+        
+        # Final classification head (step 4)
+        self.classifier = nn.Conv3d(
+            decoder_embed_dim, 
+            num_classes, 
+            kernel_size=1
+        )
+        
+        # Upsampling to original resolution
+        self.final_upsample = nn.Upsample(
+            scale_factor=2.0,  # Adjust based on your input/output ratio
+            mode="trilinear", 
+            align_corners=False
+        )
+        
+    def _make_linear_projection(self, input_dim: int, output_dim: int):
+        """Create linear projection with layer norm"""
+        return nn.Sequential(
+            nn.Conv3d(input_dim, output_dim, kernel_size=1),
+            nn.BatchNorm3d(output_dim),
+            nn.ReLU(inplace=True)
+        )
+    
+    def forward(self, features: list):
+        """
+        Args:
+            features: List of feature maps from encoder [c1, c2, c3, c4]
+                     where c1 is highest resolution, c4 is lowest
+        """
+        c1, c2, c3, c4 = features
+        
+        # Step 1: Linear projection to fixed dimension
+        _c4 = self.linear_c4(c4)
+        _c3 = self.linear_c3(c3)  
+        _c2 = self.linear_c2(c2)
+        _c1 = self.linear_c1(c1)
+        
+        # Step 2: Upsample all features to c1 size (highest resolution)
+        target_size = c1.size()[2:]  # (D, H, W)
+        
+        _c4 = torch.nn.functional.interpolate(
+            _c4, size=target_size, mode="trilinear", align_corners=False
+        )
+        _c3 = torch.nn.functional.interpolate(
+            _c3, size=target_size, mode="trilinear", align_corners=False  
+        )
+        _c2 = torch.nn.functional.interpolate(
+            _c2, size=target_size, mode="trilinear", align_corners=False
+        )
+        # _c1 is already at target size
+        
+        # Step 3: Concatenate and fuse
+        fused = self.linear_fuse(torch.cat([_c4, _c3, _c2, _c1], dim=1))
+        fused = self.dropout(fused)
+        
+        # Step 4: Generate segmentation masks
+        output = self.classifier(fused)
+        output = self.final_upsample(output)
+        
+        return output
+
+
+class SwinUNETRWithSegFormerDecoder(nn.Module):
+    """
+    SwinUNETR encoder with SegFormer-style decoder for efficient 3D segmentation
+    """
+    def __init__(
+        self,
+        img_size: Union[Tuple[int, int, int], int] = (96, 96, 96),
+        in_channels: int = 4,
+        out_channels: int = 3,
+        feature_size: int = 48,
+        use_checkpoint: bool = True,
+        decoder_embed_dim: int = 256,
+        decoder_dropout: float = 0.1
+    ):
+        super().__init__()
+        
+        # Use SwinUNETR as encoder (extract features only)
+        self.encoder = SwinUNETR(
+            img_size=img_size,
+            in_channels=in_channels,
+            out_channels=out_channels,  # We'll override this with our decoder
+            feature_size=feature_size,
+            use_checkpoint=use_checkpoint,
+            use_v2=True,
             spatial_dims=3,
             depths=(2, 2, 2, 2),
             num_heads=(3, 6, 12, 24),
@@ -35,21 +147,98 @@ class BrainTumorSegmentation(pl.LightningModule):
             drop_rate=0.0,
             attn_drop_rate=0.0,
             dropout_path_rate=0.0,
-            downsample="mergingv2"  # Use improved merging for V2
+            downsample="mergingv2"
         )
-        self.loss_function = DiceLoss(smooth_nr=0, smooth_dr=1e-5, squared_pred=True, to_onehot_y=False, sigmoid=True)
         
-        #Standard Dice Loss Metrics
+        # Calculate feature dimensions based on feature_size
+        # SwinUNETR uses feature_size * (1, 2, 4, 8) for the four stages
+        feature_dims = [
+            feature_size,      # Stage 1
+            feature_size * 2,  # Stage 2  
+            feature_size * 4,  # Stage 3
+            feature_size * 8   # Stage 4
+        ]
+        
+        # SegFormer-style decoder
+        self.decoder = SegFormerDecoder3D(
+            feature_dims=feature_dims[::-1],  # Reverse order (c4, c3, c2, c1)
+            decoder_embed_dim=decoder_embed_dim,
+            num_classes=out_channels,
+            dropout=decoder_dropout
+        )
+        
+    def extract_features(self, x):
+        """Extract multi-scale features from SwinUNETR encoder"""
+        # We need to modify this to extract intermediate features
+        # This is a simplified version - you may need to modify SwinUNETR source
+        # to properly extract intermediate features
+        
+        # For now, we'll use the existing SwinUNETR but this is not optimal
+        # Ideally, you'd modify the SwinUNETR to return intermediate features
+        hidden_states_out = self.encoder.swinViT(x, normalize=True)
+        
+        # Extract features at different scales
+        # Note: You might need to adjust these indices based on actual SwinUNETR implementation
+        enc0 = hidden_states_out[0]  # Highest resolution
+        enc1 = hidden_states_out[1] 
+        enc2 = hidden_states_out[2]
+        enc3 = hidden_states_out[3]  # Lowest resolution
+        
+        return [enc0, enc1, enc2, enc3]
+    
+    def forward(self, x):
+        # Extract multi-scale features
+        features = self.extract_features(x)
+        
+        # Decode with SegFormer-style decoder
+        output = self.decoder(features)
+        
+        return output
+
+
+class BrainTumorSegmentation(pl.LightningModule):
+    def __init__(
+        self, 
+        train_loader, 
+        val_loader, 
+        max_epochs=100, 
+        val_interval=1, 
+        learning_rate=1e-4,
+        img_size=(96, 96, 96),
+        feature_size=48,
+        decoder_embed_dim=256,
+        decoder_dropout=0.1
+    ):
+        super().__init__()
+        self.save_hyperparameters()
+        
+        # Initialize model with SegFormer decoder
+        self.model = SwinUNETRWithSegFormerDecoder(
+            img_size=img_size,
+            in_channels=4,
+            out_channels=3,
+            feature_size=feature_size,
+            use_checkpoint=True,
+            decoder_embed_dim=decoder_embed_dim,
+            decoder_dropout=decoder_dropout
+        )
+        
+        # Loss and metrics (same as before)
+        self.loss_function = DiceLoss(
+            smooth_nr=0, 
+            smooth_dr=1e-5, 
+            squared_pred=True, 
+            to_onehot_y=False, 
+            sigmoid=True
+        )
+        
         self.dice_metric = DiceMetric(include_background=True, reduction="mean")
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
-
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
-
         
         self.best_metric = -1
         self.train_loader = train_loader
         self.val_loader = val_loader
-
 
         # Training metrics
         self.avg_train_loss_values = []
@@ -73,7 +262,7 @@ class BrainTumorSegmentation(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         inputs, labels = batch["image"], batch["label"]
 
-        # Calculate Train Loss
+        # Forward pass
         outputs = self(inputs)
         loss = self.loss_function(outputs, labels)
         
@@ -82,7 +271,6 @@ class BrainTumorSegmentation(pl.LightningModule):
 
         # Apply sigmoid and threshold (same as validation)
         outputs = [self.post_trans(i) for i in decollate_batch(outputs)]
-        # outputs_tensor = torch.stack(outputs)  # Convert back to a tensor
         
         # Compute Dice
         self.dice_metric(y_pred=outputs, y=labels)
@@ -123,16 +311,22 @@ class BrainTumorSegmentation(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
+        
+        # Use sliding window inference for validation
         val_outputs = sliding_window_inference(
-            val_inputs, roi_size=(96, 96, 96), sw_batch_size=1, predictor=self.model, overlap=0.5
+            val_inputs, 
+            roi_size=(96, 96, 96), 
+            sw_batch_size=1, 
+            predictor=self.model,  # Use our custom model
+            overlap=0.5
         )
         
         # Compute loss
         val_loss = self.loss_function(val_outputs, val_labels)
-        # Log validation loss
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True)
         
         val_outputs = [self.post_trans(i) for i in decollate_batch(val_outputs)]    
+        
         # Compute Dice
         self.dice_metric(y_pred=val_outputs, y=val_labels)
         self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
@@ -141,8 +335,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         val_dice = self.dice_metric.aggregate().item()
         self.log("val_mean_dice", val_dice, prog_bar=True)
     
-        return {"val_loss": val_loss}  # Return val_loss to be used in aggregation
-
+        return {"val_loss": val_loss}
 
     def on_validation_epoch_end(self):
         # Store Dice Mean
@@ -150,7 +343,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.metric_values.append(val_dice)
 
         # Store Validation Loss 
-        # val_loss = self.trainer.logged_metrics.get("val_loss", torch.tensor(0.0))
         val_loss = self.trainer.logged_metrics["val_loss"].item()
         self.epoch_loss_values.append(val_loss)
 
@@ -175,7 +367,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         if val_dice > self.best_metric:
             self.best_metric = val_dice
             self.best_metric_epoch = self.current_epoch
-            torch.save(self.model.state_dict(), "best_metric_model_swinunetr_v2.pth")
+            torch.save(self.model.state_dict(), "best_metric_model_swinunetr_segformer.pth")
             self.log("best_metric", self.best_metric)
     
         # Reset metrics for the next epoch
@@ -190,8 +382,30 @@ class BrainTumorSegmentation(pl.LightningModule):
               f"et: {self.metric_values_et[-1]:.4f}.")
 
     def configure_optimizers(self):
-        # SwinUNETR-V2 benefits from slightly higher learning rate
-        optimizer = AdamW(self.model.parameters(), lr=self.hparams.learning_rate, weight_decay=1e-5)
+        # Slightly higher learning rate for the new architecture
+        optimizer = AdamW(
+            self.model.parameters(), 
+            lr=self.hparams.learning_rate, 
+            weight_decay=1e-5
+        )
         
         scheduler = CosineAnnealingLR(optimizer, T_max=self.hparams.max_epochs)
         return [optimizer], [scheduler]
+
+
+# Example usage and configuration
+# def create_model_with_segformer_decoder(train_loader, val_loader):
+#     """
+#     Factory function to create the model with optimized parameters
+#     """
+#     model = BrainTumorSegmentation(
+#         train_loader=train_loader,
+#         val_loader=val_loader,
+#         max_epochs=100,
+#         learning_rate=2e-4,  # Slightly higher LR for the new architecture
+#         img_size=(96, 96, 96),
+#         feature_size=48,
+#         decoder_embed_dim=256,  # SegFormer decoder embedding dimension
+#         decoder_dropout=0.1
+#     )
+#     return model

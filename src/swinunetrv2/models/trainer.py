@@ -29,7 +29,14 @@ def setup_training(train_ds, val_ds, max_epochs=30):
     wandb_logger = WandbLogger()
 
     # Initialize model
-    model = BrainTumorSegmentation(train_loader, val_loader, max_epochs=max_epochs)
+    model = BrainTumorSegmentation(
+        train_loader,
+        val_loader,
+        max_epochs=max_epochs,
+        learning_rate=2e-4, 
+        decoder_embed_dim=256,  # SegFormer decoder embedding dimension
+        decoder_dropout=0.1     # SegFormer decoder dropout
+        )
 
     # Setup trainer
     trainer = pl.Trainer(
