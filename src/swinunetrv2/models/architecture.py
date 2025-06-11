@@ -122,7 +122,6 @@ class SwinUNETRWithSegFormerDecoder(nn.Module):
     """
     def __init__(
         self,
-        img_size: Union[Tuple[int, int, int], int] = (96, 96, 96),
         in_channels: int = 4,
         out_channels: int = 3,
         feature_size: int = 48,
@@ -134,7 +133,6 @@ class SwinUNETRWithSegFormerDecoder(nn.Module):
         
         # Use SwinUNETR as encoder (extract features only)
         self.encoder = SwinUNETR(
-            img_size=img_size,
             in_channels=in_channels,
             out_channels=out_channels,  # We'll override this with our decoder
             feature_size=feature_size,
@@ -204,7 +202,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         max_epochs=100, 
         val_interval=1, 
         learning_rate=1e-4,
-        img_size=(96, 96, 96),
         feature_size=48,
         decoder_embed_dim=256,
         decoder_dropout=0.1
@@ -214,7 +211,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         
         # Initialize model with SegFormer decoder
         self.model = SwinUNETRWithSegFormerDecoder(
-            img_size=img_size,
             in_channels=4,
             out_channels=3,
             feature_size=feature_size,
@@ -403,7 +399,6 @@ class BrainTumorSegmentation(pl.LightningModule):
 #         val_loader=val_loader,
 #         max_epochs=100,
 #         learning_rate=2e-4,  # Slightly higher LR for the new architecture
-#         img_size=(96, 96, 96),
 #         feature_size=48,
 #         decoder_embed_dim=256,  # SegFormer decoder embedding dimension
 #         decoder_dropout=0.1
