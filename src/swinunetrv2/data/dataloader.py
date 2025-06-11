@@ -8,19 +8,37 @@ from monai.data import Dataset, DataLoader, CacheDataset, PersistentDataset
 from monai.utils import set_determinism
 from sklearn.model_selection import train_test_split
 import json
+import os
+from monai.data import load_decathlon_datalist
 
-# Load dataset
-dataset_path = "/kaggle/working/dataset.json"
-with open(dataset_path) as f:
-    datalist = json.load(f)["training"]
-
-# Split dataset into training (80%) and validation (20%)
-train_files, val_files = train_test_split(datalist, test_size=0.2, random_state=42)
-
-### For quick iterations use 10 percent dataset
-
-# train_files = train_files[:int(len(train_files) * 0.3)]  # 10% of training data
-# val_files = val_files[:int(len(val_files) * 0.3)]  # 10% of validation data
+def get_dataloaders(data_dir, batch_size, train_transforms, val_transforms):
+    """
+    Create training and validation dataloaders.
+    
+    Args:
+        data_dir (str): Directory containing the dataset.json file
+        batch_size (int): Batch size for training
+        train_transforms: Training transforms
+        val_transforms: Validation transforms
+    
+    Returns:
+        tuple: (train_dataset, val_dataset)
+    """
+    # Load dataset
+    dataset_path = os.path.join(data_dir, "dataset.json")
+    with open(dataset_path) as f:
+        datalist = json.load(f)["training"]
+    
+    # Split into train and validation (80/20 split)
+    train_size = int(len(datalist) * 0.8)
+    train_files = datalist[:train_size]
+    val_files = datalist[train_size:]
+    
+    # Create datasets
+    train_ds = Dataset(data=train_files, transform=train_transforms)
+    val_ds = Dataset(data=val_files, transform=val_transforms)
+    
+    return train_ds, val_ds
 
 # Set deterministic behavior
 set_determinism(seed=0)
@@ -33,14 +51,8 @@ val_transform = val_transform
 
 # Create MONAI datasets
 
-train_ds = Dataset(data=train_files, transform=train_transform)
+train_ds, val_ds = get_dataloaders("/kaggle/working", 2, train_transform, val_transform)
 # train_ds = PersistentDataset(data=train_files, transform=train_transform, cache_dir=cache_dir)
-
-
-val_ds = Dataset(data=val_files, transform=val_transform)
-# val_ds = CacheDataset(data=val_files, transform=val_transform, cache_rate=0.5, num_workers=4)
-# val_ds = PersistentDataset(data=val_files, transform=val_transform, cache_dir=cache_dir)
-
 
 
 # Dataloaders

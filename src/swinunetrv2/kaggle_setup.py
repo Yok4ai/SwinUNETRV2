@@ -32,8 +32,11 @@ def setup_kaggle_environment():
     print("Environment setup complete. Installed packages:")
     subprocess.check_call([sys.executable, "-m", "pip", "list", "|", "grep", "-E", "monai|matplotlib|einops"])
 
-def prepare_brats_data(input_dir, output_json_path):
+def prepare_brats_data(input_dir, output_dir):
     """Prepare BraTS data and create dataset.json file."""
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
     # Get sorted file paths and file names
     file_paths = glob.glob(os.path.join(input_dir, '*'))
     file_paths.sort()
@@ -65,10 +68,12 @@ def prepare_brats_data(input_dir, output_json_path):
     }
     
     # Save to JSON file
+    output_json_path = os.path.join(output_dir, "dataset.json")
     with open(output_json_path, 'w') as json_file:
         json.dump(file_json, json_file, indent=4)
     
-    return output_json_path
+    print(f"Created dataset.json at: {output_json_path}")
+    return output_dir
 
 def setup_kaggle_notebook():
     """Setup the Kaggle notebook environment and prepare data."""
@@ -77,12 +82,13 @@ def setup_kaggle_notebook():
     
     # Prepare data
     input_dir = '/kaggle/input/brats2023-part-1'
-    output_json_path = '/kaggle/working/dataset.json'
+    output_dir = '/kaggle/working'
     
-    dataset_json_path = prepare_brats_data(input_dir, output_json_path)
+    # Create dataset.json in the working directory
+    output_dir = prepare_brats_data(input_dir, output_dir)
     
-    return dataset_json_path
+    return output_dir
 
 if __name__ == "__main__":
-    dataset_json_path = setup_kaggle_notebook()
-    print(f"Dataset JSON created at: {dataset_json_path}") 
+    output_dir = setup_kaggle_notebook()
+    print(f"Setup complete. Dataset prepared in: {output_dir}") 
