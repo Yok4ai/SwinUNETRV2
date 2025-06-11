@@ -8,28 +8,6 @@ from pathlib import Path
 import shutil
 import re
 
-def setup_kaggle_environment():
-    """Setup the Kaggle notebook environment."""
-    # Install MONAI with specific dependencies
-    subprocess.check_call([
-        sys.executable, "-c",
-        "import monai" if subprocess.run([sys.executable, "-c", "import monai"]).returncode == 0
-        else "import sys; subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'monai-weekly[nibabel, tqdm, einops]'])"
-    ])
-    
-    # Install matplotlib if not present
-    subprocess.check_call([
-        sys.executable, "-c",
-        "import matplotlib" if subprocess.run([sys.executable, "-c", "import matplotlib"]).returncode == 0
-        else "import sys; subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'matplotlib'])"
-    ])
-    
-    # Install einops
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "einops"])
-    
-    # Set matplotlib to inline mode
-    plt.rcParams['figure.figsize'] = [12, 8]
-    plt.style.use('seaborn')
 
 def prepare_brats_data(input_dir, output_dir):
     """Prepare BraTS data and create dataset.json file."""
@@ -76,9 +54,6 @@ def prepare_brats_data(input_dir, output_dir):
 
 def setup_kaggle_notebook():
     """Setup the Kaggle notebook environment and prepare data."""
-    # Setup environment
-    setup_kaggle_environment()
-    
     # Prepare data
     input_dir = '/kaggle/input/brats2023-part-1'
     output_dir = '/kaggle/working'
