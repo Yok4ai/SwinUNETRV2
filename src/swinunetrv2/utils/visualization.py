@@ -1,4 +1,101 @@
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from monai.transforms import AsDiscrete
+from monai.data import decollate_batch
+import os
+
+def visualize_batch(batch, model, device, slice_idx=None):
+    """Visualize a batch of images and their predictions."""
+    model.eval()
+    with torch.no_grad():
+        # Get input images and labels
+        images = batch["image"].to(device)
+        labels = batch["label"].to(device)
+        
+        # Get model predictions
+        outputs = model(images)
+        outputs = [AsDiscrete()(i) for i in decollate_batch(outputs)]
+        labels = [AsDiscrete()(i) for i in decollate_batch(labels)]
+        
+        # Convert to numpy for visualization
+        images = images.cpu().numpy()
+        outputs = [o.cpu().numpy() for o in outputs]
+        labels = [l.cpu().numpy() for l in labels]
+        
+        # Select middle slice if not specified
+        if slice_idx is None:
+            slice_idx = images.shape[2] // 2
+        
+        # Create figure
+        fig, axes = plt.subplots(len(images), 4, figsize=(20, 5*len(images)))
+        if len(images) == 1:
+            axes = axes.reshape(1, -1)
+        
+        for idx, (img, pred, label) in enumerate(zip(images, outputs, labels)):
+            # Show T1c image
+            axes[idx, 0].imshow(img[0, :, :, slice_idx], cmap='gray')
+            axes[idx, 0].set_title('T1c Input')
+            axes[idx, 0].axis('off')
+            
+            # Show prediction
+            axes[idx, 1].imshow(pred[0, :, :, slice_idx], cmap='viridis')
+            axes[idx, 1].set_title('Prediction')
+            axes[idx, 1].axis('off')
+            
+            # Show ground truth
+            axes[idx, 2].imshow(label[0, :, :, slice_idx], cmap='viridis')
+            axes[idx, 2].set_title('Ground Truth')
+            axes[idx, 2].axis('off')
+            
+            # Show overlay
+            axes[idx, 3].imshow(img[0, :, :, slice_idx], cmap='gray')
+            axes[idx, 3].imshow(pred[0, :, :, slice_idx], cmap='viridis', alpha=0.5)
+            axes[idx, 3].set_title('Overlay')
+            axes[idx, 3].axis('off')
+        
+        plt.tight_layout()
+        return fig
+
+def plot_training_curves(train_losses, val_losses, train_metrics, val_metrics, save_path=None):
+    """Plot training and validation curves."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+    
+    # Plot losses
+    ax1.plot(train_losses, label='Training Loss')
+    ax1.plot(val_losses, label='Validation Loss')
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('Loss')
+    ax1.set_title('Training and Validation Loss')
+    ax1.legend()
+    ax1.grid(True)
+    
+    # Plot metrics
+    ax2.plot(train_metrics, label='Training Dice')
+    ax2.plot(val_metrics, label='Validation Dice')
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('Dice Score')
+    ax2.set_title('Training and Validation Dice Score')
+    ax2.legend()
+    ax2.grid(True)
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path)
+    
+    return fig
+
+def visualize_predictions(model, val_loader, device, num_samples=4, save_dir=None):
+    """Visualize predictions on validation set."""
+    model.eval()
+    batch = next(iter(val_loader))
+    fig = visualize_batch(batch, model, device)
+    
+    if save_dir:
+        plt.savefig(os.path.join(save_dir, 'predictions.png'))
+    
+    return fig
 
 # Plotting train vs validation metrics
 plt.figure("train", (12, 6))
