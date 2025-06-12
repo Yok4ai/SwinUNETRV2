@@ -1,9 +1,12 @@
 import torch
+import torch.nn as nn
 from monai.networks.nets import SwinUNETR
 
-class BrainTumorSegmentationModel:
+
+class BrainTumorModel(nn.Module):
     def __init__(self):
-        # SwinUNETR-V2 Configuration (img_size removed as it's deprecated)
+        super().__init__()
+        # SwinUNETR-V2 Configuration
         self.model = SwinUNETR(
             in_channels=4,
             out_channels=3,
@@ -19,6 +22,6 @@ class BrainTumorSegmentationModel:
             dropout_path_rate=0.0,
             downsample="mergingv2"  # Use improved merging for V2
         )
-
+    
     def forward(self, x):
         return self.model(x)

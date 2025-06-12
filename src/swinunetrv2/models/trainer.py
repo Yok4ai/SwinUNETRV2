@@ -7,6 +7,7 @@ from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 import wandb
 from .pipeline import BrainTumorSegmentation
+from .architecture import BrainTumorModel
 
 def setup_training(train_ds, val_ds, args):
     # Data loaders

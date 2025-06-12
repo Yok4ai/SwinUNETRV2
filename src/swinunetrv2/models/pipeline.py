@@ -15,26 +15,30 @@ from pytorch_lightning.callbacks.timer import Timer
 from torch.cuda.amp import GradScaler
 import wandb
 from pytorch_lightning.loggers import WandbLogger
-from .architecture import BrainTumorSegmentationModel
 
-class BrainTumorSegmentationPipeline(pl.LightningModule):
-    def __init__(self, model, train_loader, val_loader, max_epochs=100, val_interval=1, learning_rate=1e-4):
+from .architecture import BrainTumorModel
+
+
+class BrainTumorSegmentation(pl.LightningModule):
+    def __init__(self, train_loader, val_loader, max_epochs=100, val_interval=1, learning_rate=1e-4):
         super().__init__()
         self.save_hyperparameters()
-        self.model = model
-        self.loss_function = DiceLoss(smooth_nr=0, smooth_dr=1e-5, squared_pred=True, to_onehot_y=False, sigmoid=True)
         
-        #Standard Dice Loss Metrics
+        # Initialize model
+        self.model = BrainTumorModel()
+        
+        # Loss and metrics
+        self.loss_function = DiceLoss(smooth_nr=0, smooth_dr=1e-5, squared_pred=True, to_onehot_y=False, sigmoid=True)
         self.dice_metric = DiceMetric(include_background=True, reduction="mean")
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
-
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
 
-        
-        self.best_metric = -1
+        # Data loaders
         self.train_loader = train_loader
         self.val_loader = val_loader
-
+        
+        # Best metric tracking
+        self.best_metric = -1
 
         # Training metrics
         self.avg_train_loss_values = []
@@ -125,7 +129,7 @@ class BrainTumorSegmentationPipeline(pl.LightningModule):
         val_dice = self.dice_metric.aggregate().item()
         self.log("val_mean_dice", val_dice, prog_bar=True)
     
-        return {"val_loss": val_loss}  # Return val_loss to be used in aggregation
+        return {"val_loss": val_loss}
 
     def on_validation_epoch_end(self):
         # Store Dice Mean
@@ -174,6 +178,5 @@ class BrainTumorSegmentationPipeline(pl.LightningModule):
     def configure_optimizers(self):
         # SwinUNETR-V2 benefits from slightly higher learning rate
         optimizer = AdamW(self.model.parameters(), lr=self.hparams.learning_rate, weight_decay=1e-5)
-        
         scheduler = CosineAnnealingLR(optimizer, T_max=self.hparams.max_epochs)
         return [optimizer], [scheduler]
