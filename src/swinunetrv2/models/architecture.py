@@ -11,7 +11,6 @@ class BrainTumorModel(nn.Module):
         feature_size=24,
         depths=(2, 2, 2, 2),
         num_heads=(3, 6, 12, 24),
-        patch_size=(2, 2, 2),
         weight_decay=1e-5,
         warmup_epochs=5,
         drop_rate=0.0,

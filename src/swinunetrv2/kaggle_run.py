@@ -58,7 +58,6 @@ args = argparse.Namespace(
     feature_size=24,
     depths=[2, 2, 6, 2],
     num_heads=[3, 6, 12, 24],
-    patch_size=2,
     drop_rate=0.1,
     attn_drop_rate=0.1,
     use_checkpoint=True,

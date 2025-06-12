@@ -63,7 +63,6 @@ def setup_training(train_ds, val_ds, args):
         feature_size=args.feature_size,
         depths=args.depths,
         num_heads=args.num_heads,
-        patch_size=args.patch_size,
         weight_decay=args.weight_decay,
         warmup_epochs=args.warmup_epochs,
         drop_rate=args.drop_rate,
