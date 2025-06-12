@@ -1,52 +1,26 @@
-#pipeline.py
+import os
+import time
 import torch
 import pytorch_lightning as pl
-import math
-from monai.losses import DiceLoss
+from monai.losses import DiceLoss, DiceCELoss
 from monai.metrics import DiceMetric
 from monai.transforms import Compose, Activations, AsDiscrete
+from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset
 from monai.inferers import sliding_window_inference
-from monai.data import decollate_batch
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
-from .architecture import LightweightSwinUNETR
+from torch.optim import Adam, AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
+from monai.data import DataLoader, Dataset
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.callbacks.timer import Timer
+from torch.cuda.amp import GradScaler
+import wandb
+from pytorch_lightning.loggers import WandbLogger
 
-class BrainTumorSegmentation(pl.LightningModule):
-    def __init__(
-        self, 
-        train_loader, 
-        val_loader, 
-        max_epochs=50, 
-        learning_rate=5e-4,
-        feature_size=48,
-        depths=[2, 2, 6, 2],
-        num_heads=[3, 6, 12, 24],
-        patch_size=4,
-        weight_decay=1e-5,
-        warmup_epochs=5,
-        drop_rate=0.1,
-        attn_drop_rate=0.1,
-        roi_size=(128, 128, 128),
-        sw_batch_size=2,
-        overlap=0.25
-    ):
+class BrainTumorSegmentationPipeline(pl.LightningModule):
+    def __init__(self, model, train_loader, val_loader, max_epochs=100, val_interval=1, learning_rate=1e-4):
         super().__init__()
         self.save_hyperparameters()
-        
-        # Model
-        self.model = LightweightSwinUNETR(
-            in_channels=4,
-            out_channels=3,
-            depths=depths,
-            num_heads=num_heads,
-            patch_size=patch_size,
-            dropout=drop_rate
-        )
-        
-        # Print model size
-        total_params = self.model.count_parameters()
-        print(f"🚀 Model initialized with {total_params:,} parameters ({total_params/1e6:.2f}M)")
-        
+        self.model = model
         self.loss_function = DiceLoss(smooth_nr=0, smooth_dr=1e-5, squared_pred=True, to_onehot_y=False, sigmoid=True)
         
         #Standard Dice Loss Metrics
@@ -92,7 +66,6 @@ class BrainTumorSegmentation(pl.LightningModule):
 
         # Apply sigmoid and threshold (same as validation)
         outputs = [self.post_trans(i) for i in decollate_batch(outputs)]
-        # outputs_tensor = torch.stack(outputs)  # Convert back to a tensor
         
         # Compute Dice
         self.dice_metric(y_pred=outputs, y=labels)
@@ -153,14 +126,12 @@ class BrainTumorSegmentation(pl.LightningModule):
     
         return {"val_loss": val_loss}  # Return val_loss to be used in aggregation
 
-
     def on_validation_epoch_end(self):
         # Store Dice Mean
         val_dice = self.dice_metric.aggregate().item()
         self.metric_values.append(val_dice)
 
         # Store Validation Loss 
-        # val_loss = self.trainer.logged_metrics.get("val_loss", torch.tensor(0.0))
         val_loss = self.trainer.logged_metrics["val_loss"].item()
         self.epoch_loss_values.append(val_loss)
 
