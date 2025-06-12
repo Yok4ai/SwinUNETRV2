@@ -1,4 +1,4 @@
-# improved_architecture.py
+#architecture.py
 import os
 import time
 import torch
@@ -59,29 +59,13 @@ def window_reverse(windows, window_size, D, H, W):
     
     # Remove padding if it was added
     if pad_d > 0 or pad_h > 0 or pad_w > 0:
-        x = x[:, :D, :H, :W, :].contiguous()
+        x = x[:, :D, :H, :W, :].contiguous()  # Add contiguous() here
         
     return x
 
 
-class DepthwiseConv3D(nn.Module):
-    """Efficient depthwise separable 3D convolution"""
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
-        super().__init__()
-        self.depthwise = nn.Conv3d(in_channels, in_channels, kernel_size, stride, padding, groups=in_channels)
-        self.pointwise = nn.Conv3d(in_channels, out_channels, 1)
-        self.bn = nn.BatchNorm3d(out_channels)
-        self.act = nn.GELU()
-        
-    def forward(self, x):
-        x = self.depthwise(x)
-        x = self.pointwise(x)
-        x = self.bn(x)
-        return self.act(x)
-
-
-class EfficientWindowAttention3D(nn.Module):
-    """Memory-efficient 3D Window Attention with linear complexity"""
+class WindowAttention3D(nn.Module):
+    """Lightweight 3D Window Attention"""
     def __init__(self, dim, window_size, num_heads, qkv_bias=True, attn_drop=0., proj_drop=0.):
         super().__init__()
         self.dim = dim
@@ -90,19 +74,11 @@ class EfficientWindowAttention3D(nn.Module):
         head_dim = dim // num_heads
         self.scale = head_dim ** -0.5
 
-        # Efficient QKV projection with dimension reduction
+        # Lightweight QKV projection
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-
-        # Learnable relative position bias
-        self.relative_position_bias_table = nn.Parameter(
-            torch.zeros((2 * window_size - 1) * (2 * window_size - 1) * (2 * window_size - 1), num_heads)
-        )
-        
-        # Initialize relative position bias
-        nn.init.trunc_normal_(self.relative_position_bias_table, std=.02)
 
     def forward(self, x):
         B_, N, C = x.shape
@@ -111,11 +87,6 @@ class EfficientWindowAttention3D(nn.Module):
 
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1))
-        
-        # Add relative position bias if available
-        if hasattr(self, 'relative_position_bias_table'):
-            attn = attn + self.relative_position_bias_table[:self.num_heads].unsqueeze(0).unsqueeze(2)
-        
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
@@ -125,39 +96,8 @@ class EfficientWindowAttention3D(nn.Module):
         return x
 
 
-class EfficientMLP(nn.Module):
-    """Efficient MLP with depthwise convolutions"""
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
-        super().__init__()
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
-        
-        self.fc1 = nn.Linear(in_features, hidden_features)
-        self.dwconv = nn.Conv3d(hidden_features, hidden_features, 3, 1, 1, groups=hidden_features)
-        self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_features, out_features)
-        self.drop = nn.Dropout(drop)
-        self.bn = nn.BatchNorm3d(hidden_features)
-
-    def forward(self, x, D, H, W):
-        B, N, C = x.shape
-        x = self.fc1(x)
-        
-        # Apply depthwise conv in spatial domain
-        x_spatial = x.transpose(1, 2).view(B, C, D, H, W)
-        x_spatial = self.dwconv(x_spatial)
-        x_spatial = self.bn(x_spatial)
-        x = x_spatial.flatten(2).transpose(1, 2)
-        
-        x = self.act(x)
-        x = self.drop(x)
-        x = self.fc2(x)
-        x = self.drop(x)
-        return x
-
-
-class ImprovedSwinTransformerBlock3D(nn.Module):
-    """Improved Swin Transformer Block with better efficiency"""
+class SwinTransformerBlock3D(nn.Module):
+    """Lightweight Swin Transformer Block for 3D"""
     def __init__(self, dim, num_heads, window_size=4, mlp_ratio=2., qkv_bias=True, drop=0., attn_drop=0.):
         super().__init__()
         self.dim = dim
@@ -166,18 +106,20 @@ class ImprovedSwinTransformerBlock3D(nn.Module):
         self.mlp_ratio = mlp_ratio
 
         self.norm1 = nn.LayerNorm(dim)
-        self.attn = EfficientWindowAttention3D(
+        self.attn = WindowAttention3D(
             dim, window_size=window_size, num_heads=num_heads, qkv_bias=qkv_bias, 
             attn_drop=attn_drop, proj_drop=drop
         )
 
         self.norm2 = nn.LayerNorm(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = EfficientMLP(
-            in_features=dim,
-            hidden_features=mlp_hidden_dim,
-            act_layer=nn.GELU,
-            drop=drop
+        # Lightweight MLP
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, mlp_hidden_dim),
+            nn.GELU(),
+            nn.Dropout(drop),
+            nn.Linear(mlp_hidden_dim, dim),
+            nn.Dropout(drop)
         )
 
     def forward(self, x, D, H, W):
@@ -187,42 +129,39 @@ class ImprovedSwinTransformerBlock3D(nn.Module):
         x = self.norm1(x)
         x = x.view(B, D, H, W, C)
 
-        # Store original dimensions
+        # Store original dimensions for padding removal
         original_D, original_H, original_W = D, H, W
 
-        # Window partition
+        # Window partition (with automatic padding)
         x_windows = window_partition(x, self.window_size)
         x_windows = x_windows.view(-1, self.window_size * self.window_size * self.window_size, C)
 
         # W-MSA
         attn_windows = self.attn(x_windows)
 
-        # Merge windows
+        # Merge windows (with automatic padding removal)
         attn_windows = attn_windows.view(-1, self.window_size, self.window_size, self.window_size, C)
         x = window_reverse(attn_windows, self.window_size, original_D, original_H, original_W)
         
+        # FIX: Use reshape instead of view for non-contiguous tensors
         x = x.reshape(B, original_D * original_H * original_W, C)
 
         # FFN
         x = shortcut + x
-        x = x + self.mlp(self.norm2(x), original_D, original_H, original_W)
+        x = x + self.mlp(self.norm2(x))
 
         return x
 
 
-class ImprovedPatchEmbedding3D(nn.Module):
-    """Improved patch embedding with better feature extraction"""
-    def __init__(self, patch_size=4, in_chans=4, embed_dim=64):
+class PatchEmbedding3D(nn.Module):
+    """Lightweight 3D Patch Embedding"""
+    def __init__(self, patch_size=4, in_chans=4, embed_dim=48):
         super().__init__()
         self.patch_size = patch_size
         self.in_chans = in_chans
         self.embed_dim = embed_dim
 
-        # Use depthwise separable conv for efficiency
-        self.proj = nn.Sequential(
-            DepthwiseConv3D(in_chans, embed_dim//2, kernel_size=7, stride=2, padding=3),
-            DepthwiseConv3D(embed_dim//2, embed_dim, kernel_size=3, stride=2, padding=1)
-        )
+        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
         self.norm = nn.LayerNorm(embed_dim)
 
     def forward(self, x):
@@ -234,40 +173,57 @@ class ImprovedPatchEmbedding3D(nn.Module):
         return x, (D, H, W)
 
 
-class ImprovedPatchMerging3D(nn.Module):
-    """Improved patch merging with better downsampling"""
+class PatchMerging3D(nn.Module):
+    """Lightweight patch merging for downsampling with robust padding"""
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
-        # Use depthwise separable conv for merging
-        self.conv = DepthwiseConv3D(dim, 2 * dim, kernel_size=3, stride=2, padding=1)
-        self.norm = nn.LayerNorm(2 * dim)
+        self.reduction = nn.Linear(8 * dim, 2 * dim, bias=False)  # 2x3D = 8 neighbors
+        self.norm = nn.LayerNorm(8 * dim)
 
     def forward(self, x, D, H, W):
         B, L, C = x.shape
         
-        # Reshape to spatial dimensions
-        x = x.view(B, D, H, W, C).permute(0, 4, 1, 2, 3).contiguous()
+        x = x.view(B, D, H, W, C)
         
-        # Apply convolution
-        x = self.conv(x)  # B, 2*C, D//2, H//2, W//2
+        # Always pad to ensure even dimensions
+        pad_d = D % 2
+        pad_h = H % 2  
+        pad_w = W % 2
         
-        B, C_new, D_new, H_new, W_new = x.shape
-        x = x.flatten(2).transpose(1, 2)  # B, D*H*W, 2*C
+        if pad_d or pad_h or pad_w:
+            x = torch.nn.functional.pad(x, (0, 0, 0, pad_w, 0, pad_h, 0, pad_d))
+            D, H, W = D + pad_d, H + pad_h, W + pad_w
+
+        # Merge 2x2x2 patches
+        x0 = x[:, 0::2, 0::2, 0::2, :]  # B D/2 H/2 W/2 C
+        x1 = x[:, 1::2, 0::2, 0::2, :]  # B D/2 H/2 W/2 C
+        x2 = x[:, 0::2, 1::2, 0::2, :]  # B D/2 H/2 W/2 C
+        x3 = x[:, 1::2, 1::2, 0::2, :]  # B D/2 H/2 W/2 C
+        x4 = x[:, 0::2, 0::2, 1::2, :]  # B D/2 H/2 W/2 C
+        x5 = x[:, 1::2, 0::2, 1::2, :]  # B D/2 H/2 W/2 C
+        x6 = x[:, 0::2, 1::2, 1::2, :]  # B D/2 H/2 W/2 C
+        x7 = x[:, 1::2, 1::2, 1::2, :]  # B D/2 H/2 W/2 C
+        
+        x = torch.cat([x0, x1, x2, x3, x4, x5, x6, x7], -1)  # B D/2 H/2 W/2 8*C
+        # FIX: Use reshape instead of view
+        x = x.reshape(B, -1, 8 * C)  # B D/2*H/2*W/2 8*C
+
         x = self.norm(x)
+        x = self.reduction(x)
 
-        return x, (D_new, H_new, W_new)
+        return x, (D // 2, H // 2, W // 2)
 
 
-class ImprovedSwinEncoder3D(nn.Module):
-    """Improved Swin Transformer Encoder with better efficiency"""
+class LightweightSwinEncoder3D(nn.Module):
+    """Ultra-lightweight Swin Transformer Encoder for 3D"""
     def __init__(
         self,
         patch_size=4,
         in_chans=4,
-        embed_dim=64,  # Increased base dimension
-        depths=[2, 2, 6, 2],  # Standard depths
-        num_heads=[2, 4, 8, 16],  # More heads for better representation
+        embed_dim=32,  # Much smaller base dimension
+        depths=[1, 1, 1, 1],  # Fewer layers
+        num_heads=[1, 2, 4, 8],  # Fewer heads
         window_size=4,
         mlp_ratio=2.,
         qkv_bias=True,
@@ -276,7 +232,7 @@ class ImprovedSwinEncoder3D(nn.Module):
     ):
         super().__init__()
         
-        self.patch_embed = ImprovedPatchEmbedding3D(
+        self.patch_embed = PatchEmbedding3D(
             patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim
         )
         
@@ -285,7 +241,7 @@ class ImprovedSwinEncoder3D(nn.Module):
         for i_layer in range(len(depths)):
             layer_dim = int(embed_dim * 2 ** i_layer)
             layer = nn.ModuleList([
-                ImprovedSwinTransformerBlock3D(
+                SwinTransformerBlock3D(
                     dim=layer_dim,
                     num_heads=num_heads[i_layer],
                     window_size=window_size,
@@ -300,7 +256,7 @@ class ImprovedSwinEncoder3D(nn.Module):
             
             # Add patch merging except for the last layer
             if i_layer < len(depths) - 1:
-                self.layers.append(ImprovedPatchMerging3D(layer_dim))
+                self.layers.append(PatchMerging3D(layer_dim))
         
         self.num_layers = len(depths)
         self.embed_dim = embed_dim
@@ -321,6 +277,7 @@ class ImprovedSwinEncoder3D(nn.Module):
             # Store feature for decoder
             B, L, C = x.shape
             D, H, W = dims[-1]
+            # FIX: Use reshape and ensure contiguous
             feature = x.reshape(B, D, H, W, C).permute(0, 4, 1, 2, 3).contiguous()
             features.append(feature)
             
@@ -335,56 +292,28 @@ class ImprovedSwinEncoder3D(nn.Module):
         return features
 
 
-class ImprovedSegFormerDecoder3D(nn.Module):
-    """Improved SegFormer-style decoder with skip connections"""
+class SegFormerDecoder3D(nn.Module):
+    """Ultra-lightweight SegFormer-style decoder"""
     def __init__(
         self,
-        feature_dims=[64, 128, 256, 512],
-        decoder_embed_dim=128,  # Increased from 64
+        feature_dims=[32, 64, 128, 256],  # Much smaller dimensions
+        decoder_embed_dim=64,  # Reduced from 256
         num_classes=3,
         dropout=0.1
     ):
         super().__init__()
         
-        # Feature projections
-        self.linear_c4 = nn.Sequential(
-            nn.Conv3d(feature_dims[3], decoder_embed_dim, 1),
-            nn.BatchNorm3d(decoder_embed_dim),
-            nn.ReLU(inplace=True)
-        )
-        self.linear_c3 = nn.Sequential(
-            nn.Conv3d(feature_dims[2], decoder_embed_dim, 1),
-            nn.BatchNorm3d(decoder_embed_dim),
-            nn.ReLU(inplace=True)
-        )
-        self.linear_c2 = nn.Sequential(
-            nn.Conv3d(feature_dims[1], decoder_embed_dim, 1),
-            nn.BatchNorm3d(decoder_embed_dim),
-            nn.ReLU(inplace=True)
-        )
-        self.linear_c1 = nn.Sequential(
-            nn.Conv3d(feature_dims[0], decoder_embed_dim, 1),
-            nn.BatchNorm3d(decoder_embed_dim),
-            nn.ReLU(inplace=True)
-        )
+        # Lightweight linear projections
+        self.linear_c4 = nn.Conv3d(feature_dims[3], decoder_embed_dim, 1)
+        self.linear_c3 = nn.Conv3d(feature_dims[2], decoder_embed_dim, 1) 
+        self.linear_c2 = nn.Conv3d(feature_dims[1], decoder_embed_dim, 1)
+        self.linear_c1 = nn.Conv3d(feature_dims[0], decoder_embed_dim, 1)
         
-        # Feature fusion with attention
-        self.fuse_attention = nn.Sequential(
-            nn.Conv3d(4 * decoder_embed_dim, decoder_embed_dim, 3, padding=1),
-            nn.BatchNorm3d(decoder_embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(decoder_embed_dim, 4, 1),
-            nn.Sigmoid()
-        )
-        
-        # Enhanced fusion module
+        # Lightweight fusion
         self.linear_fuse = nn.Sequential(
-            nn.Conv3d(4 * decoder_embed_dim, decoder_embed_dim, 3, padding=1),
+            nn.Conv3d(4 * decoder_embed_dim, decoder_embed_dim, 1),
             nn.BatchNorm3d(decoder_embed_dim),
             nn.ReLU(inplace=True),
-            nn.Conv3d(decoder_embed_dim, decoder_embed_dim, 3, padding=1),
-            nn.BatchNorm3d(decoder_embed_dim),
-            nn.ReLU(inplace=True)
         )
         
         self.dropout = nn.Dropout3d(dropout)
@@ -406,26 +335,14 @@ class ImprovedSegFormerDecoder3D(nn.Module):
         _c3 = torch.nn.functional.interpolate(_c3, size=target_size, mode="trilinear", align_corners=False)
         _c2 = torch.nn.functional.interpolate(_c2, size=target_size, mode="trilinear", align_corners=False)
         
-        # Concatenate features
-        concat_features = torch.cat([_c4, _c3, _c2, _c1], dim=1)
-        
-        # Attention-based fusion
-        attention_weights = self.fuse_attention(concat_features)
-        weighted_features = torch.cat([
-            _c4 * attention_weights[:, 0:1], 
-            _c3 * attention_weights[:, 1:2],
-            _c2 * attention_weights[:, 2:3], 
-            _c1 * attention_weights[:, 3:4]
-        ], dim=1)
-        
         # Fuse features
-        fused = self.linear_fuse(weighted_features)
+        fused = self.linear_fuse(torch.cat([_c4, _c3, _c2, _c1], dim=1))
         fused = self.dropout(fused)
         
         # Final classification
         output = self.classifier(fused)
         
-        # Upsample to original resolution
+        # Upsample to original resolution (4x upsampling to match patch_size=4)
         output = torch.nn.functional.interpolate(
             output, scale_factor=4, mode="trilinear", align_corners=False
         )
@@ -433,25 +350,25 @@ class ImprovedSegFormerDecoder3D(nn.Module):
         return output
 
 
-class ImprovedLightweightSwinUNETR(nn.Module):
-    """Improved Lightweight SwinUNETR with better performance"""
+class LightweightSwinUNETR(nn.Module):
+    """Ultra-lightweight SwinUNETR with ~4M parameters"""
     def __init__(
         self,
         patch_size=4,
         in_channels=4,
         out_channels=3,
-        embed_dim=64,  # Increased base dimension
-        depths=[2, 2, 6, 2],  # Standard depths
-        num_heads=[2, 4, 8, 16],  # More heads
+        embed_dim=32,  # Very small base dimension
+        depths=[1, 1, 1, 1],  # Minimal depth
+        num_heads=[1, 2, 4, 8],
         window_size=4,
         mlp_ratio=2.,
-        decoder_embed_dim=128,  # Increased decoder dimension
+        decoder_embed_dim=64,  # Small decoder
         dropout=0.1
     ):
         super().__init__()
         
-        # Improved encoder
-        self.encoder = ImprovedSwinEncoder3D(
+        # Lightweight encoder
+        self.encoder = LightweightSwinEncoder3D(
             patch_size=patch_size,
             in_chans=in_channels,
             embed_dim=embed_dim,
@@ -464,8 +381,8 @@ class ImprovedLightweightSwinUNETR(nn.Module):
         # Calculate feature dimensions
         feature_dims = [int(embed_dim * 2 ** i) for i in range(len(depths))]
         
-        # Improved decoder
-        self.decoder = ImprovedSegFormerDecoder3D(
+        # Lightweight decoder
+        self.decoder = SegFormerDecoder3D(
             feature_dims=feature_dims,
             decoder_embed_dim=decoder_embed_dim,
             num_classes=out_channels,
@@ -482,25 +399,25 @@ class ImprovedLightweightSwinUNETR(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
-class ImprovedBrainTumorSegmentation(pl.LightningModule):
+class BrainTumorSegmentation(pl.LightningModule):
     def __init__(
         self, 
         train_loader, 
         val_loader, 
         max_epochs=50, 
         val_interval=1, 
-        learning_rate=1e-3,  # Reduced learning rate
+        learning_rate=2e-3,
         img_size=128,
         feature_size=48,
-        embed_dim=64,  # Increased
-        depths=[2, 2, 6, 2],  # Standard depths
-        num_heads=[2, 4, 8, 16],  # More heads
-        window_size=4,
-        mlp_ratio=2.0,  # Reduced MLP ratio
-        decoder_embed_dim=128,  # Increased
+        embed_dim=48,
+        depths=[2, 2, 6, 2],
+        num_heads=[3, 6, 12, 24],
+        window_size=7,
+        mlp_ratio=4.0,
+        decoder_embed_dim=256,
         patch_size=4,
         weight_decay=1e-4,
-        warmup_epochs=10,  # More warmup
+        warmup_epochs=5,
         drop_rate=0.1,
         attn_drop_rate=0.1,
         roi_size=(128, 128, 128),
@@ -510,8 +427,8 @@ class ImprovedBrainTumorSegmentation(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         
-        # Improved model
-        self.model = ImprovedLightweightSwinUNETR(
+        # Ultra-lightweight model
+        self.model = LightweightSwinUNETR(
             in_channels=4,
             out_channels=3,
             embed_dim=embed_dim,
@@ -526,17 +443,16 @@ class ImprovedBrainTumorSegmentation(pl.LightningModule):
         
         # Print model size
         total_params = self.model.count_parameters()
-        print(f"🚀 Improved Model initialized with {total_params:,} parameters ({total_params/1e6:.2f}M)")
+        print(f"🚀 Model initialized with {total_params:,} parameters ({total_params/1e6:.2f}M)")
         
-        # Combined loss function for better training
-        self.dice_loss = DiceLoss(
+        # Loss and metrics
+        self.loss_function = DiceLoss(
             smooth_nr=0, 
             smooth_dr=1e-5, 
             squared_pred=True, 
             to_onehot_y=False, 
             sigmoid=True
         )
-        self.ce_loss = nn.CrossEntropyLoss()
         
         self.dice_metric = DiceMetric(include_background=True, reduction="mean")
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
@@ -572,21 +488,9 @@ class ImprovedBrainTumorSegmentation(pl.LightningModule):
         inputs, labels = batch["image"], batch["label"]
 
         outputs = self(inputs)
-        
-        # Combined loss
-        dice_loss = self.dice_loss(outputs, labels)
-        
-        # Convert to one-hot for CE loss
-        labels_onehot = torch.zeros_like(outputs)
-        for i in range(3):
-            labels_onehot[:, i] = (labels[:, 0] == i).float()
-        
-        ce_loss = self.ce_loss(outputs, labels_onehot.argmax(dim=1))
-        loss = 0.7 * dice_loss + 0.3 * ce_loss
+        loss = self.loss_function(outputs, labels)
         
         self.log("train_loss", loss, prog_bar=True)
-        self.log("train_dice_loss", dice_loss, prog_bar=True)
-        self.log("train_ce_loss", ce_loss, prog_bar=True)
 
         outputs = [self.post_trans(i) for i in decollate_batch(outputs)]
         
@@ -631,7 +535,7 @@ class ImprovedBrainTumorSegmentation(pl.LightningModule):
             overlap=self.overlap
         )
         
-        val_loss = self.dice_loss(val_outputs, val_labels)
+        val_loss = self.loss_function(val_outputs, val_labels)
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True)
         
         val_outputs = [self.post_trans(i) for i in decollate_batch(val_outputs)]    
@@ -669,7 +573,7 @@ class ImprovedBrainTumorSegmentation(pl.LightningModule):
         if val_dice > self.best_metric:
             self.best_metric = val_dice
             self.best_metric_epoch = self.current_epoch
-            torch.save(self.model.state_dict(), "best_metric_model_improved_swinunetr.pth")
+            torch.save(self.model.state_dict(), "best_metric_model_lightweight_swinunetr.pth")
             self.log("best_metric", self.best_metric)
     
         self.dice_metric.reset()
@@ -682,27 +586,21 @@ class ImprovedBrainTumorSegmentation(pl.LightningModule):
               f"et: {self.metric_values_et[-1]:.4f}.")
 
     def configure_optimizers(self):
-        # Use different learning rates for different components
-        encoder_params = list(self.model.encoder.parameters())
-        decoder_params = list(self.model.decoder.parameters())
+        optimizer = AdamW(
+            self.model.parameters(), 
+            lr=self.hparams.learning_rate, 
+            weight_decay=self.hparams.weight_decay
+        )
         
-        optimizer = AdamW([
-            {'params': encoder_params, 'lr': self.hparams.learning_rate},
-            {'params': decoder_params, 'lr': self.hparams.learning_rate * 2}  # Higher LR for decoder
-        ], weight_decay=self.hparams.weight_decay)
-        
-        # Cosine annealing with warmup
+        # Add warmup scheduler
         total_steps = len(self.train_loader) * self.hparams.max_epochs
         warmup_steps = len(self.train_loader) * self.hparams.warmup_epochs
         
-        def lr_lambda(current_step):
-            if current_step < warmup_steps:
-                return float(current_step) / float(max(1, warmup_steps))
-            progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-            return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
-        
         scheduler = {
-            'scheduler': torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda),
+            'scheduler': CosineAnnealingLR(
+                optimizer, 
+                T_max=total_steps - warmup_steps
+            ),
             'interval': 'step',
             'frequency': 1
         }
@@ -710,25 +608,25 @@ class ImprovedBrainTumorSegmentation(pl.LightningModule):
         return [optimizer], [scheduler]
 
 
-# Test function for the improved model
-def test_improved_model():
-    """Test the improved model with better architecture"""
-    print("🧪 Testing improved model...")
+# Memory-efficient model test function
+def test_model_memory():
+    """Test the model with a small input to verify it works"""
+    print("🧪 Testing model memory and functionality...")
     
+    # Create a small test input
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    test_input = torch.randn(1, 4, 128, 128, 128).to(device)
+    test_input = torch.randn(1, 4, 96, 96, 96).to(device)
     
-    # Create improved model
-    model = ImprovedLightweightSwinUNETR(
-        embed_dim=64,
-        depths=[2, 2, 6, 2],
-        num_heads=[2, 4, 8, 16],
-        decoder_embed_dim=128
+    # Create model
+    model = LightweightSwinUNETR(
+        embed_dim=32,
+        depths=[1, 1, 1, 1],
+        decoder_embed_dim=64
     ).to(device)
     
     # Count parameters
     total_params = model.count_parameters()
-    print(f"✅ Improved Model has {total_params:,} parameters ({total_params/1e6:.2f}M)")
+    print(f"✅ Model has {total_params:,} parameters ({total_params/1e6:.2f}M)")
     
     # Test forward pass
     model.eval()
@@ -752,66 +650,10 @@ def test_improved_model():
     return True
 
 
-# Comparison function
-def compare_models():
-    """Compare original vs improved model"""
-    print("🔬 Comparing model architectures...")
-    
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    # Original model (from your code)
-    from architecture import LightweightSwinUNETR as OriginalModel
-    original = OriginalModel(
-        embed_dim=32,
-        depths=[1, 1, 1, 1],
-        decoder_embed_dim=64
-    ).to(device)
-    
-    # Improved model
-    improved = ImprovedLightweightSwinUNETR(
-        embed_dim=64,
-        depths=[2, 2, 6, 2],
-        decoder_embed_dim=128
-    ).to(device)
-    
-    original_params = original.count_parameters()
-    improved_params = improved.count_parameters()
-    
-    print(f"📊 Model Comparison:")
-    print(f"   Original Model: {original_params:,} parameters ({original_params/1e6:.2f}M)")
-    print(f"   Improved Model: {improved_params:,} parameters ({improved_params/1e6:.2f}M)")
-    print(f"   Parameter increase: {((improved_params/original_params)-1)*100:.1f}%")
-    
-    # Test inference time
-    test_input = torch.randn(1, 4, 96, 96, 96).to(device)
-    
-    # Original model timing
-    torch.cuda.synchronize()
-    start_time = time.time()
-    with torch.no_grad():
-        _ = original(test_input)
-    torch.cuda.synchronize()
-    original_time = time.time() - start_time
-    
-    # Improved model timing
-    torch.cuda.synchronize()
-    start_time = time.time()
-    with torch.no_grad():
-        _ = improved(test_input)
-    torch.cuda.synchronize()
-    improved_time = time.time() - start_time
-    
-    print(f"⏱️  Inference Time Comparison (96³ volume):")
-    print(f"   Original Model: {original_time*1000:.1f}ms")
-    print(f"   Improved Model: {improved_time*1000:.1f}ms")
-    print(f"   Time increase: {((improved_time/original_time)-1)*100:.1f}%")
-
-
 if __name__ == "__main__":
-    # Test the improved model
-    success = test_improved_model()
+    # Test the model
+    success = test_model_memory()
     if success:
-        print("🎉 Improved model is ready for training!")
-        compare_models()
+        print("🎉 Model is ready for training!")
     else:
-        print("💥 Improved model needs debugging.")
+        print("💥 Model needs debugging before training.")
