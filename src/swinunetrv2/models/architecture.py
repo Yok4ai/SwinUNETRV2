@@ -85,13 +85,17 @@ class UltraEfficientSwinUNETR(nn.Module):
         # Store encoder features for skip connections
         self.encoder_features = []
         
-        # Create lightweight decoder components
+        # Create lightweight decoder components with correct feature dimensions
+        # These dimensions match the actual encoder output channels
         feature_dims = [
-            self.feature_size * 16,  # From layer 4
-            self.feature_size * 8,   # From layer 3  
-            self.feature_size * 4,   # From layer 2
-            self.feature_size * 2,   # From layer 1
+            self.feature_size * 8,   # From layer 4 (dec4)
+            self.feature_size * 4,   # From layer 3 (enc3)
+            self.feature_size * 2,   # From layer 2 (enc2)
+            self.feature_size,       # From layer 1 (enc1)
         ]
+        
+        # Print feature dimensions for debugging
+        print(f"Feature dimensions for projections: {feature_dims}")
         
         # MLP projections for each feature level (like SegFormer)
         self.feature_projections = nn.ModuleList([
@@ -234,10 +238,14 @@ class LightweightMLP(nn.Module):
     
     def __init__(self, input_dim, output_dim):
         super().__init__()
+        # Ensure input_dim matches the actual input channels
         self.proj = nn.Conv3d(input_dim, output_dim, kernel_size=1)
         self.norm = nn.BatchNorm3d(output_dim)
         
     def forward(self, x):
+        # Add shape check for debugging
+        if x.shape[1] != self.proj.in_channels:
+            raise ValueError(f"Expected input channels {self.proj.in_channels}, got {x.shape[1]}")
         x = self.proj(x)
         x = self.norm(x)
         return x
