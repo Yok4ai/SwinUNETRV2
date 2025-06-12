@@ -114,7 +114,16 @@ class EfficientWindowAttention3D(nn.Module):
         
         # Add relative position bias if available
         if hasattr(self, 'relative_position_bias_table'):
-            attn = attn + self.relative_position_bias_table[:self.num_heads].unsqueeze(0).unsqueeze(2)
+            # Reshape relative position bias to match attention scores
+            relative_position_bias = self.relative_position_bias_table.view(
+                self.num_heads, -1
+            ).permute(1, 0).contiguous()
+            relative_position_bias = relative_position_bias.view(
+                self.window_size * self.window_size * self.window_size,
+                self.window_size * self.window_size * self.window_size,
+                self.num_heads
+            ).permute(2, 0, 1).contiguous()
+            attn = attn + relative_position_bias.unsqueeze(0)
         
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
