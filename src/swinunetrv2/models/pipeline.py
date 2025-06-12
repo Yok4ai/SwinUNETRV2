@@ -36,12 +36,16 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.args = args
         self.save_hyperparameters(ignore=['train_loader', 'val_loader'])
         
-        # Initialize model using the architecture module
-        # Option 1: Use the wrapper class
-        self.model = BrainTumorModel(args)
+        # Initialize model using the factory function for cleaner memory management
+        self.model = create_swinunetr_model(args)
         
-        # Option 2: Use the factory function (alternative)
-        # self.model = create_swinunetr_model(args)
+        # Enable memory efficient attention if available
+        if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
+            torch.backends.cuda.enable_flash_sdp(True)
+        
+        # Enable memory efficient attention if available
+        if hasattr(torch.backends.cuda, 'enable_mem_efficient_sdp'):
+            torch.backends.cuda.enable_mem_efficient_sdp(True)
         
         self.loss_function = DiceLoss(
             smooth_nr=0, 

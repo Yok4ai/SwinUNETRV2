@@ -60,26 +60,26 @@ args = argparse.Namespace(
     num_heads=[3, 6, 12, 24],
     drop_rate=0.1,
     attn_drop_rate=0.1,
-    use_checkpoint=True,
+    use_checkpoint=True,  # Enable gradient checkpointing
     
     # Training parameters
     learning_rate=1e-4,  # More conservative
     weight_decay=1e-5,
-    epochs=5,  # Increased epochs
+    epochs=5,
     warmup_epochs=5,
     device='cuda',
-    use_amp=True,
+    use_amp=True,  # Enable mixed precision
     gradient_clip_val=1.0,
-    accumulate_grad_batches=2,  # Increased for effective batch size
+    accumulate_grad_batches=1,  # Reduced to minimize memory usage
     
     # Validation settings
     val_interval=1,
     save_interval=1,
     early_stopping_patience=15,
-    limit_val_batches=10,  # Increased for better validation
+    limit_val_batches=5,  # Reduced for memory efficiency
     
     # Inference parameters
-    roi_size=[96, 96, 96],
+    roi_size=[64, 64, 64],  # Reduced ROI size
     sw_batch_size=1,
     overlap=0.25,
 )

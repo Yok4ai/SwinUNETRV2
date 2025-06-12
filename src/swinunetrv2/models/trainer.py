@@ -90,6 +90,13 @@ def setup_training(train_ds, val_ds, args):
         logger=wandb_logger,
         accumulate_grad_batches=args.accumulate_grad_batches,
         enable_progress_bar=True,
+        # Memory optimization settings
+        deterministic=False,  # Allow for faster training
+        benchmark=True,  # Optimize cudnn for consistent input sizes
+        enable_model_summary=True,
+        enable_checkpointing=True,
+        # Enable memory efficient attention
+        enable_flash_attention=True if hasattr(torch.backends.cuda, 'enable_flash_sdp') else False,
     )
 
     return model, trainer, train_loader, val_loader
