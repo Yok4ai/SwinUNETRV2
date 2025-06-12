@@ -193,12 +193,20 @@ class SegFormerMLP(nn.Module):
     
     def __init__(self, input_dim, output_dim):
         super().__init__()
+        # Ensure input dimension is divisible by 12
+        if input_dim % 12 != 0:
+            input_dim = (input_dim // 12) * 12
         self.proj = nn.Linear(input_dim, output_dim)
         self.norm = nn.LayerNorm(output_dim)
     
     def forward(self, x):
         # x: (B, C, D, H, W) -> (B, D*H*W, C) -> (B, D*H*W, output_dim) -> (B, output_dim, D, H, W)
         B, C, D, H, W = x.shape
+        
+        # Ensure input channels are divisible by 12
+        if C % 12 != 0:
+            C = (C // 12) * 12
+            x = x[:, :C]
         
         # Flatten spatial dimensions and apply MLP
         x = x.flatten(2).transpose(1, 2)  # (B, D*H*W, C)
@@ -229,19 +237,19 @@ def create_hybrid_swinunetr(
     
     configs = {
         "light": {
-            "feature_size": 24,
+            "feature_size": 24,  # Divisible by 12
             "depths": (1, 1, 1, 1),
             "num_heads": (2, 4, 8, 16),
             "decoder_embedding_dim": 96,
         },
         "balanced": {
-            "feature_size": 36,  
+            "feature_size": 36,  # Divisible by 12
             "depths": (1, 1, 2, 1),
             "num_heads": (2, 4, 8, 16),
             "decoder_embedding_dim": 128,
         },
         "performance": {
-            "feature_size": 48,
+            "feature_size": 48,  # Divisible by 12
             "depths": (2, 2, 2, 2),
             "num_heads": (3, 6, 12, 24),
             "decoder_embedding_dim": 192,
