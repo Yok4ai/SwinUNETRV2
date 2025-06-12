@@ -67,22 +67,23 @@ def get_segformer_style_config():
     return {
         "efficiency_level": "ultra",
         "use_segformer_style": True,
+        "feature_size": 12,  # Changed to be divisible by 12
         "batch_size": 8,
-        "accumulate_grad_batches": 2,  # effective batch = 16
-        "learning_rate": 1e-3,  # Higher LR for smaller model
-        "sw_batch_size": 4,  # Can afford larger sliding window batch
+        "accumulate_grad_batches": 2,
+        "learning_rate": 1e-3,
+        "sw_batch_size": 4,
     }
 
 def get_ultra_lightweight_config():
     """Ultra lightweight - ~8-12M parameters"""
     return {
         "efficiency_level": "ultra",
-        "feature_size": 16,
+        "feature_size": 12,  # Changed to be divisible by 12
         "depths": (1, 1, 1, 1),
         "num_heads": (1, 2, 4, 8),
-        "decoder_channels": (64, 32, 16, 8),
+        "decoder_channels": (48, 24, 12, 6),  # Adjusted to match feature size
         "batch_size": 6,
-        "accumulate_grad_batches": 2,  # effective batch = 12
+        "accumulate_grad_batches": 2,
         "learning_rate": 8e-4,
     }
 
@@ -90,12 +91,12 @@ def get_high_efficiency_config():
     """High efficiency - ~12-18M parameters"""
     return {
         "efficiency_level": "high",
-        "feature_size": 20,
+        "feature_size": 24,  # Already divisible by 12
         "depths": (1, 1, 2, 1),
         "num_heads": (2, 4, 6, 12),
-        "decoder_channels": (80, 40, 20, 10),
+        "decoder_channels": (96, 48, 24, 12),
         "batch_size": 5,
-        "accumulate_grad_batches": 3,  # effective batch = 15
+        "accumulate_grad_batches": 3,
         "learning_rate": 6e-4,
     }
 
@@ -103,12 +104,12 @@ def get_balanced_efficiency_config():
     """Balanced efficiency - ~18-25M parameters"""
     return {
         "efficiency_level": "balanced",
-        "feature_size": 24,
+        "feature_size": 24,  # Already divisible by 12
         "depths": (1, 1, 2, 1),
         "num_heads": (2, 4, 8, 16),
         "decoder_channels": (96, 48, 24, 12),
         "batch_size": 4,
-        "accumulate_grad_batches": 3,  # effective batch = 12
+        "accumulate_grad_batches": 3,
         "learning_rate": 5e-4,
     }
 
@@ -116,17 +117,16 @@ def get_performance_efficiency_config():
     """Performance efficiency - ~25-35M parameters"""
     return {
         "efficiency_level": "performance",
-        "feature_size": 32,
+        "feature_size": 36,  # Changed to be divisible by 12
         "depths": (2, 2, 2, 2),
         "num_heads": (3, 6, 12, 24),
-        "decoder_channels": (128, 64, 32, 16),
+        "decoder_channels": (144, 72, 36, 18),  # Adjusted to match feature size
         "batch_size": 3,
-        "accumulate_grad_batches": 4,  # effective batch = 12
+        "accumulate_grad_batches": 4,
         "learning_rate": 3e-4,
     }
 
 # 🚀 CHOOSE YOUR CONFIGURATION
-# Change this to experiment with different efficiency levels
 config_type = "segformer_style"  # Options: "segformer_style", "ultra_lightweight", "high_efficiency", "balanced_efficiency", "performance_efficiency"
 
 config_map = {

@@ -18,9 +18,9 @@ class UltraEfficientSwinUNETR(nn.Module):
         self,
         in_channels: int = 4,
         out_channels: int = 3,
-        feature_size: int = 24,  # Much smaller base feature size
-        depths: Sequence[int] = (1, 1, 2, 1),  # Reduced depths like SegFormer
-        num_heads: Sequence[int] = (2, 4, 8, 16),  # Efficient head configuration
+        feature_size: int = 24,
+        depths: Sequence[int] = (1, 1, 2, 1),
+        num_heads: Sequence[int] = (2, 4, 8, 16),
         use_checkpoint: bool = True,
         use_v2: bool = True,
         spatial_dims: int = 3,
@@ -28,14 +28,17 @@ class UltraEfficientSwinUNETR(nn.Module):
         drop_rate: float = 0.1,
         attn_drop_rate: float = 0.1,
         dropout_path_rate: float = 0.1,
-        # New efficiency parameters
         use_depthwise_conv: bool = True,
         use_lightweight_decoder: bool = True,
-        decoder_channels: Sequence[int] = (96, 48, 24, 12),  # Much smaller decoder
+        decoder_channels: Sequence[int] = (96, 48, 24, 12),
         reduce_skip_connections: bool = True,
         use_separable_conv: bool = True,
     ):
         super().__init__()
+        
+        # Validate feature size is divisible by 12
+        if feature_size % 12 != 0:
+            raise ValueError(f"feature_size must be divisible by 12, got {feature_size}")
         
         self.feature_size = feature_size
         self.spatial_dims = spatial_dims
@@ -44,7 +47,7 @@ class UltraEfficientSwinUNETR(nn.Module):
         # Create the base SwinUNETR with minimal feature size
         self.backbone = SwinUNETR(
             in_channels=in_channels,
-            out_channels=feature_size * 4,  # Temporary output, will replace decoder
+            out_channels=feature_size * 4,
             feature_size=feature_size,
             use_checkpoint=use_checkpoint,
             use_v2=use_v2,
@@ -58,7 +61,6 @@ class UltraEfficientSwinUNETR(nn.Module):
             downsample="mergingv2"
         )
         
-        # Replace the decoder with an ultra-lightweight one
         if use_lightweight_decoder:
             self._replace_decoder_with_lightweight(
                 decoder_channels, 
@@ -68,7 +70,6 @@ class UltraEfficientSwinUNETR(nn.Module):
                 reduce_skip_connections
             )
         
-        # Count and display parameters
         self._display_parameter_info()
     
     def _replace_decoder_with_lightweight(

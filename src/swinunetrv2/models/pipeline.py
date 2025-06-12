@@ -39,25 +39,22 @@ class BrainTumorSegmentation(pl.LightningModule):
         norm_name="instance",
         use_checkpoint=True,
         use_v2=True,
-        # Legacy parameters (ignored but kept for compatibility)
-        img_size=128,
-        embed_dim=None,
-        window_size=None,
-        mlp_ratio=None,
-        decoder_embed_dim=None,
-        patch_size=None,
-        **kwargs  # Catch any other legacy parameters
+        **kwargs
     ):
         super().__init__()
         self.save_hyperparameters()
         
+        # Validate feature size is divisible by 12
+        if feature_size % 12 != 0:
+            raise ValueError(f"feature_size must be divisible by 12, got {feature_size}")
+        
         # Warn about ignored parameters
         ignored_params = []
-        if embed_dim is not None: ignored_params.append(f"embed_dim={embed_dim}")
-        if window_size is not None: ignored_params.append(f"window_size={window_size}")
-        if mlp_ratio is not None: ignored_params.append(f"mlp_ratio={mlp_ratio}")
-        if decoder_embed_dim is not None: ignored_params.append(f"decoder_embed_dim={decoder_embed_dim}")
-        if patch_size is not None: ignored_params.append(f"patch_size={patch_size}")
+        if 'embed_dim' in kwargs: ignored_params.append(f"embed_dim={kwargs['embed_dim']}")
+        if 'window_size' in kwargs: ignored_params.append(f"window_size={kwargs['window_size']}")
+        if 'mlp_ratio' in kwargs: ignored_params.append(f"mlp_ratio={kwargs['mlp_ratio']}")
+        if 'decoder_embed_dim' in kwargs: ignored_params.append(f"decoder_embed_dim={kwargs['decoder_embed_dim']}")
+        if 'patch_size' in kwargs: ignored_params.append(f"patch_size={kwargs['patch_size']}")
         
         if ignored_params:
             print(f"⚠️  Ignoring custom implementation parameters: {', '.join(ignored_params)}")
@@ -79,7 +76,6 @@ class BrainTumorSegmentation(pl.LightningModule):
                 dropout_path_rate=dropout_path_rate,
             )
         else:
-            # Use factory function for different efficiency levels
             print(f"🚀 Using {efficiency_level.upper()} efficiency Ultra-Efficient SwinUNETR")
             
             # Custom configuration if specific parameters provided

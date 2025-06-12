@@ -13,6 +13,10 @@ from .pipeline import BrainTumorSegmentation
 def setup_training(train_ds, val_ds, args):
     """Setup training with Ultra-Efficient SwinUNETR configurations"""
     
+    # Validate feature size is divisible by 12
+    if args.feature_size % 12 != 0:
+        raise ValueError(f"feature_size must be divisible by 12, got {args.feature_size}")
+    
     # Enhanced data loaders with efficiency optimizations
     train_loader = DataLoader(
         train_ds, 
@@ -21,8 +25,8 @@ def setup_training(train_ds, val_ds, args):
         num_workers=args.num_workers, 
         pin_memory=args.pin_memory, 
         persistent_workers=args.persistent_workers,
-        drop_last=True,  # Ensure consistent batch sizes
-        prefetch_factor=2 if args.num_workers > 0 else 2  # Optimize for efficiency
+        drop_last=True,
+        prefetch_factor=2 if args.num_workers > 0 else 2
     )
     val_loader = DataLoader(
         val_ds, 
@@ -41,7 +45,7 @@ def setup_training(train_ds, val_ds, args):
         patience=args.early_stopping_patience,
         verbose=True,
         mode='max',
-        check_finite=True  # Handle potential NaN values
+        check_finite=True
     )
     
     # Model checkpointing with efficiency-aware naming
