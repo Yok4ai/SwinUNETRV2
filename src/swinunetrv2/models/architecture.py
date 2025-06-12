@@ -613,11 +613,12 @@ class BrainTumorSegmentation(pl.LightningModule):
 
         outputs = self(inputs)
         
+        # FIXED: Ensure labels have correct shape for DiceCELoss
+        if labels.shape[1] != 1:
+            labels = labels.argmax(dim=1, keepdim=True)
+        
         # FIXED: Proper loss calculation with class weights
         loss = self.dice_ce_loss(outputs, labels)
-        # Add weighted cross entropy loss
-        ce_loss = nn.CrossEntropyLoss(weight=self.class_weights)(outputs, labels.squeeze(1).long())
-        loss = loss + 0.5 * ce_loss  # Combine losses with weighting
         
         self.log("train_loss", loss, prog_bar=True)
 
@@ -673,11 +674,12 @@ class BrainTumorSegmentation(pl.LightningModule):
             overlap=self.overlap
         )
         
+        # FIXED: Ensure labels have correct shape for DiceCELoss
+        if val_labels.shape[1] != 1:
+            val_labels = val_labels.argmax(dim=1, keepdim=True)
+        
         # FIXED: Proper validation loss calculation with class weights
         val_loss = self.dice_ce_loss(val_outputs, val_labels)
-        # Add weighted cross entropy loss
-        val_ce_loss = nn.CrossEntropyLoss(weight=self.class_weights)(val_outputs, val_labels.squeeze(1).long())
-        val_loss = val_loss + 0.5 * val_ce_loss  # Combine losses with weighting
         
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True)
         
