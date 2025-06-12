@@ -235,7 +235,7 @@ def create_hybrid_swinunetr(
             "decoder_embedding_dim": 96,
         },
         "balanced": {
-            "feature_size": 32,  
+            "feature_size": 36,  
             "depths": (1, 1, 2, 1),
             "num_heads": (2, 4, 8, 16),
             "decoder_embedding_dim": 128,

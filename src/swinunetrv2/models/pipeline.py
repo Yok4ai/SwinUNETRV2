@@ -23,7 +23,7 @@ class HybridBrainTumorSegmentation(pl.LightningModule):
         decoder_embedding_dim=128,
         use_segformer_decoder=True,
         # SwinUNETR backbone parameters
-        feature_size=32,
+        feature_size=36,
         depths=(1, 1, 2, 1),
         num_heads=(2, 4, 8, 16),
         # Training parameters

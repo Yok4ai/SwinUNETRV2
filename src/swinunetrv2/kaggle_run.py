@@ -11,7 +11,7 @@ def create_hybrid_args(preset="balanced"):
     """Create arguments for Hybrid SwinUNETR-SegFormer3D"""
     
     # Get preset configuration
-    from .pipeline import get_hybrid_config
+    from swinunetrv2.models.pipeline import get_hybrid_config
     config = get_hybrid_config(preset)
     
     return argparse.Namespace(
@@ -32,7 +32,7 @@ def create_hybrid_args(preset="balanced"):
         decoder_embedding_dim=config["decoder_embedding_dim"],
         
         # SwinUNETR backbone parameters (will be set by efficiency_level)
-        feature_size=32,  # Will be overridden by efficiency_level
+        feature_size=36,  # Will be overridden by efficiency_level
         depths=(1, 1, 2, 1),
         num_heads=(2, 4, 8, 16),
         
