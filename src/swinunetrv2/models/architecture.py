@@ -1,4 +1,4 @@
-# improved_architecture.py
+# architecture.py
 import os
 import time
 import torch
@@ -156,8 +156,8 @@ class EfficientMLP(nn.Module):
         return x
 
 
-class ImprovedSwinTransformerBlock3D(nn.Module):
-    """Improved Swin Transformer Block with better efficiency"""
+class SwinTransformerBlock3D(nn.Module):
+    """Swin Transformer Block with better efficiency"""
     def __init__(self, dim, num_heads, window_size=4, mlp_ratio=2., qkv_bias=True, drop=0., attn_drop=0.):
         super().__init__()
         self.dim = dim
@@ -210,8 +210,8 @@ class ImprovedSwinTransformerBlock3D(nn.Module):
         return x
 
 
-class ImprovedPatchEmbedding3D(nn.Module):
-    """Improved patch embedding with better feature extraction"""
+class PatchEmbedding3D(nn.Module):
+    """Patch embedding with better feature extraction"""
     def __init__(self, patch_size=4, in_chans=4, embed_dim=64):
         super().__init__()
         self.patch_size = patch_size
@@ -234,8 +234,8 @@ class ImprovedPatchEmbedding3D(nn.Module):
         return x, (D, H, W)
 
 
-class ImprovedPatchMerging3D(nn.Module):
-    """Improved patch merging with better downsampling"""
+class PatchMerging3D(nn.Module):
+    """Patch merging with better downsampling"""
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
@@ -259,8 +259,8 @@ class ImprovedPatchMerging3D(nn.Module):
         return x, (D_new, H_new, W_new)
 
 
-class ImprovedSwinEncoder3D(nn.Module):
-    """Improved Swin Transformer Encoder with better efficiency"""
+class SwinEncoder3D(nn.Module):
+    """Swin Transformer Encoder with better efficiency"""
     def __init__(
         self,
         patch_size=4,
@@ -276,7 +276,7 @@ class ImprovedSwinEncoder3D(nn.Module):
     ):
         super().__init__()
         
-        self.patch_embed = ImprovedPatchEmbedding3D(
+        self.patch_embed = PatchEmbedding3D(
             patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim
         )
         
@@ -285,7 +285,7 @@ class ImprovedSwinEncoder3D(nn.Module):
         for i_layer in range(len(depths)):
             layer_dim = int(embed_dim * 2 ** i_layer)
             layer = nn.ModuleList([
-                ImprovedSwinTransformerBlock3D(
+                SwinTransformerBlock3D(
                     dim=layer_dim,
                     num_heads=num_heads[i_layer],
                     window_size=window_size,
@@ -300,7 +300,7 @@ class ImprovedSwinEncoder3D(nn.Module):
             
             # Add patch merging except for the last layer
             if i_layer < len(depths) - 1:
-                self.layers.append(ImprovedPatchMerging3D(layer_dim))
+                self.layers.append(PatchMerging3D(layer_dim))
         
         self.num_layers = len(depths)
         self.embed_dim = embed_dim
@@ -335,8 +335,8 @@ class ImprovedSwinEncoder3D(nn.Module):
         return features
 
 
-class ImprovedSegFormerDecoder3D(nn.Module):
-    """Improved SegFormer-style decoder with skip connections"""
+class SegFormerDecoder3D(nn.Module):
+    """SegFormer-style decoder with skip connections"""
     def __init__(
         self,
         feature_dims=[64, 128, 256, 512],
@@ -433,8 +433,8 @@ class ImprovedSegFormerDecoder3D(nn.Module):
         return output
 
 
-class ImprovedLightweightSwinUNETR(nn.Module):
-    """Improved Lightweight SwinUNETR with better performance"""
+class LightweightSwinUNETR(nn.Module):
+    """Lightweight SwinUNETR with better performance"""
     def __init__(
         self,
         patch_size=4,
@@ -450,8 +450,8 @@ class ImprovedLightweightSwinUNETR(nn.Module):
     ):
         super().__init__()
         
-        # Improved encoder
-        self.encoder = ImprovedSwinEncoder3D(
+        # Encoder
+        self.encoder = SwinEncoder3D(
             patch_size=patch_size,
             in_chans=in_channels,
             embed_dim=embed_dim,
@@ -464,8 +464,8 @@ class ImprovedLightweightSwinUNETR(nn.Module):
         # Calculate feature dimensions
         feature_dims = [int(embed_dim * 2 ** i) for i in range(len(depths))]
         
-        # Improved decoder
-        self.decoder = ImprovedSegFormerDecoder3D(
+        # Decoder
+        self.decoder = SegFormerDecoder3D(
             feature_dims=feature_dims,
             decoder_embed_dim=decoder_embed_dim,
             num_classes=out_channels,
@@ -482,7 +482,7 @@ class ImprovedLightweightSwinUNETR(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
-class ImprovedBrainTumorSegmentation(pl.LightningModule):
+class BrainTumorSegmentation(pl.LightningModule):
     def __init__(
         self, 
         train_loader, 
@@ -510,8 +510,8 @@ class ImprovedBrainTumorSegmentation(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         
-        # Improved model
-        self.model = ImprovedLightweightSwinUNETR(
+        # Model
+        self.model = LightweightSwinUNETR(
             in_channels=4,
             out_channels=3,
             embed_dim=embed_dim,
@@ -526,7 +526,7 @@ class ImprovedBrainTumorSegmentation(pl.LightningModule):
         
         # Print model size
         total_params = self.model.count_parameters()
-        print(f"🚀 Improved Model initialized with {total_params:,} parameters ({total_params/1e6:.2f}M)")
+        print(f"🚀 Model initialized with {total_params:,} parameters ({total_params/1e6:.2f}M)")
         
         # Combined loss function for better training
         self.dice_loss = DiceLoss(
@@ -669,7 +669,7 @@ class ImprovedBrainTumorSegmentation(pl.LightningModule):
         if val_dice > self.best_metric:
             self.best_metric = val_dice
             self.best_metric_epoch = self.current_epoch
-            torch.save(self.model.state_dict(), "best_metric_model_improved_swinunetr.pth")
+            torch.save(self.model.state_dict(), "best_metric_model_swinunetr.pth")
             self.log("best_metric", self.best_metric)
     
         self.dice_metric.reset()
@@ -710,16 +710,15 @@ class ImprovedBrainTumorSegmentation(pl.LightningModule):
         return [optimizer], [scheduler]
 
 
-# Test function for the improved model
-def test_improved_model():
-    """Test the improved model with better architecture"""
-    print("🧪 Testing improved model...")
+def test_model():
+    """Test the model with architecture"""
+    print("🧪 Testing model...")
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     test_input = torch.randn(1, 4, 128, 128, 128).to(device)
     
-    # Create improved model
-    model = ImprovedLightweightSwinUNETR(
+    # Create model
+    model = LightweightSwinUNETR(
         embed_dim=64,
         depths=[2, 2, 6, 2],
         num_heads=[2, 4, 8, 16],
@@ -728,7 +727,7 @@ def test_improved_model():
     
     # Count parameters
     total_params = model.count_parameters()
-    print(f"✅ Improved Model has {total_params:,} parameters ({total_params/1e6:.2f}M)")
+    print(f"✅ Model has {total_params:,} parameters ({total_params/1e6:.2f}M)")
     
     # Test forward pass
     model.eval()
@@ -754,7 +753,7 @@ def test_improved_model():
 
 # Comparison function
 def compare_models():
-    """Compare original vs improved model"""
+    """Compare original vs model"""
     print("🔬 Comparing model architectures...")
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -767,20 +766,20 @@ def compare_models():
         decoder_embed_dim=64
     ).to(device)
     
-    # Improved model
-    improved = ImprovedLightweightSwinUNETR(
+    # Model
+    model = LightweightSwinUNETR(
         embed_dim=64,
         depths=[2, 2, 6, 2],
         decoder_embed_dim=128
     ).to(device)
     
     original_params = original.count_parameters()
-    improved_params = improved.count_parameters()
+    model_params = model.count_parameters()
     
     print(f"📊 Model Comparison:")
     print(f"   Original Model: {original_params:,} parameters ({original_params/1e6:.2f}M)")
-    print(f"   Improved Model: {improved_params:,} parameters ({improved_params/1e6:.2f}M)")
-    print(f"   Parameter increase: {((improved_params/original_params)-1)*100:.1f}%")
+    print(f"   Model: {model_params:,} parameters ({model_params/1e6:.2f}M)")
+    print(f"   Parameter increase: {((model_params/original_params)-1)*100:.1f}%")
     
     # Test inference time
     test_input = torch.randn(1, 4, 96, 96, 96).to(device)
@@ -793,25 +792,25 @@ def compare_models():
     torch.cuda.synchronize()
     original_time = time.time() - start_time
     
-    # Improved model timing
+    # Model timing
     torch.cuda.synchronize()
     start_time = time.time()
     with torch.no_grad():
-        _ = improved(test_input)
+        _ = model(test_input)
     torch.cuda.synchronize()
-    improved_time = time.time() - start_time
+    model_time = time.time() - start_time
     
     print(f"⏱️  Inference Time Comparison (96³ volume):")
     print(f"   Original Model: {original_time*1000:.1f}ms")
-    print(f"   Improved Model: {improved_time*1000:.1f}ms")
-    print(f"   Time increase: {((improved_time/original_time)-1)*100:.1f}%")
+    print(f"   Model: {model_time*1000:.1f}ms")
+    print(f"   Time increase: {((model_time/original_time)-1)*100:.1f}%")
 
 
 if __name__ == "__main__":
-    # Test the improved model
-    success = test_improved_model()
+    # Test the model
+    success = test_model()
     if success:
-        print("🎉 Improved model is ready for training!")
+        print("🎉 Model is ready for training!")
         compare_models()
     else:
-        print("💥 Improved model needs debugging.")
+        print("💥 Model needs debugging.")

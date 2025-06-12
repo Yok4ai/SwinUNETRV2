@@ -7,10 +7,10 @@ from pytorch_lightning.callbacks.timer import Timer
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
 import wandb
-from .architecture import ImprovedBrainTumorSegmentation
+from .architecture import BrainTumorSegmentation
 
 
-class ImprovedEarlyStopping(EarlyStopping):
+class CustomEarlyStopping(EarlyStopping):
     """Custom early stopping with better patience strategy"""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -27,8 +27,8 @@ class ImprovedEarlyStopping(EarlyStopping):
                 super().on_validation_end(trainer, pl_module)
 
 
-def setup_improved_training(train_ds, val_ds, args):
-    """Setup training with improved configurations"""
+def setup_training(train_ds, val_ds, args):
+    """Setup training with configurations"""
     
     # Enhanced data loaders
     train_loader = DataLoader(
@@ -50,7 +50,7 @@ def setup_improved_training(train_ds, val_ds, args):
     )
 
     # Improved callbacks
-    early_stop_callback = ImprovedEarlyStopping(
+    early_stop_callback = CustomEarlyStopping(
         monitor="val_mean_dice",
         min_delta=0.005,  # Smaller threshold for improvement
         patience=20,  # More patience
@@ -61,7 +61,7 @@ def setup_improved_training(train_ds, val_ds, args):
     # Model checkpointing
     checkpoint_callback = ModelCheckpoint(
         dirpath="./checkpoints",
-        filename="improved-swinunetr-{epoch:02d}-{val_mean_dice:.3f}",
+        filename="swinunetr-{epoch:02d}-{val_mean_dice:.3f}",
         monitor="val_mean_dice",
         mode="max",
         save_top_k=3,
@@ -78,9 +78,9 @@ def setup_improved_training(train_ds, val_ds, args):
     # Initialize wandb with better tracking
     wandb.init(
         project="brain-tumor-segmentation", 
-        name="improved-swinunetr-v3-brats23",
+        name="swinunetr-v3-brats23",
         config={
-            "architecture": "ImprovedLightweightSwinUNETR",
+            "architecture": "LightweightSwinUNETR",
             "embed_dim": args.embed_dim,
             "depths": args.depths,
             "num_heads": args.num_heads,
@@ -92,8 +92,8 @@ def setup_improved_training(train_ds, val_ds, args):
     )
     wandb_logger = WandbLogger()
 
-    # Initialize improved model with better hyperparameters
-    model = ImprovedBrainTumorSegmentation(
+    # Initialize model with hyperparameters
+    model = BrainTumorSegmentation(
         train_loader,
         val_loader,
         max_epochs=args.epochs,
@@ -116,7 +116,7 @@ def setup_improved_training(train_ds, val_ds, args):
         overlap=args.overlap
     )
 
-    # Setup trainer with improved configurations
+    # Setup trainer with configurations
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         devices=1,
@@ -141,9 +141,9 @@ def setup_improved_training(train_ds, val_ds, args):
     return model, trainer, train_loader, val_loader
 
 
-def train_improved_model(model, trainer, train_loader, val_loader):
-    """Train the improved model with better monitoring"""
-    print("🚀 Starting improved training...")
+def train_model(model, trainer, train_loader, val_loader):
+    """Train the model with monitoring"""
+    print("🚀 Starting training...")
     
     # Log model architecture details
     total_params = model.model.count_parameters()
@@ -160,6 +160,6 @@ def train_improved_model(model, trainer, train_loader, val_loader):
     print(f"   Final ET: {model.metric_values_et[-1]:.4f}")
     
     # Save final model
-    torch.save(model.model.state_dict(), "final_improved_swinunetr.pth")
+    torch.save(model.model.state_dict(), "final_swinunetr.pth")
     
     return model

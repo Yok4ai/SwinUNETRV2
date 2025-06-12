@@ -115,11 +115,6 @@ args = argparse.Namespace(
     sw_batch_size=2,
     overlap=0.25,
     
-    # 🔧 ADDITIONAL IMPROVEMENTS
-    model_type='improved_lightweight_swinunetr',  # Use improved architecture
-    loss_type='combined',  # Use Dice + CE loss
-    scheduler_type='cosine_warmup',  # Better learning rate scheduling
-    optimizer_type='adamw_differential',  # Different LR for encoder/decoder
 )
 
 # Enhanced configuration validation
