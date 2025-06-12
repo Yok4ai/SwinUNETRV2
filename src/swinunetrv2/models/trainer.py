@@ -113,28 +113,30 @@ def setup_training(train_ds, val_ds, args):
     )
     wandb_logger = WandbLogger()
 
-    # Initialize Ultra-Efficient SwinUNETR model
+    # Initialize Ultra-Efficient SwinUNETR model with all efficiency parameters
     model = BrainTumorSegmentation(
         train_loader,
         val_loader,
         max_epochs=args.epochs,
         learning_rate=args.learning_rate,
-        # Ultra-Efficient SwinUNETR parameters
+        # Efficiency configuration
         efficiency_level=efficiency_level,
         use_segformer_style=use_segformer_style,
         feature_size=args.feature_size,
         depths=args.depths,
         num_heads=args.num_heads,
         decoder_channels=getattr(args, 'decoder_channels', (96, 48, 24, 12)),
-        # Standard training parameters
+        # Training parameters
         weight_decay=args.weight_decay,
         warmup_epochs=args.warmup_epochs,
         drop_rate=args.drop_rate,
         attn_drop_rate=args.attn_drop_rate,
         dropout_path_rate=args.dropout_path_rate,
+        # Inference parameters
         roi_size=args.roi_size,
         sw_batch_size=args.sw_batch_size,
         overlap=args.overlap,
+        # Performance parameters
         use_mixed_precision=args.use_amp,
         norm_name=args.norm_name,
         use_checkpoint=args.use_checkpoint,
@@ -357,159 +359,3 @@ def get_model_summary(model):
     
     return summary
 
-
-def compare_efficiency_levels():
-    """Compare different efficiency levels available"""
-    print("\n📊 ULTRA-EFFICIENT SWINUNETR EFFICIENCY LEVELS:")
-    print("=" * 60)
-    
-    levels = {
-        "segformer_style": {
-            "params": "5-8M",
-            "memory": "~2GB", 
-            "description": "Maximum efficiency, SegFormer3D-like",
-            "best_for": "Limited GPU memory, fast inference"
-        },
-        "ultra": {
-            "params": "8-12M",
-            "memory": "~2.5GB",
-            "description": "Ultra lightweight, minimal parameters",
-            "best_for": "Resource-constrained environments"
-        },
-        "high": {
-            "params": "12-18M",
-            "memory": "~3GB",
-            "description": "High efficiency with good performance",
-            "best_for": "Balanced training speed and accuracy"
-        },
-        "balanced": {
-            "params": "18-25M",
-            "memory": "~3.5GB",
-            "description": "Balanced efficiency and performance",
-            "best_for": "Most use cases, good compromise"
-        },
-        "performance": {
-            "params": "25-35M",
-            "memory": "~4GB",
-            "description": "Performance-focused efficiency",
-            "best_for": "Best accuracy while staying efficient"
-        }
-    }
-    
-    for level, info in levels.items():
-        print(f"\n🎯 {level.upper()}:")
-        print(f"   Parameters: {info['params']}")
-        print(f"   Memory: {info['memory']}")
-        print(f"   Description: {info['description']}")
-        print(f"   Best for: {info['best_for']}")
-    
-    print(f"\n📋 Reference comparison:")
-    print(f"   • Standard MONAI SwinUNETR: ~62M parameters")
-    print(f"   • SegFormer3D: ~8-15M parameters")
-    print(f"   • UNet3D: ~30-40M parameters")
-    print(f"   • nnU-Net: ~31M parameters")
-
-
-def benchmark_efficiency(model, input_shape=(1, 4, 128, 128, 128)):
-    """Benchmark model efficiency metrics"""
-    print(f"\n⚡ Benchmarking Ultra-Efficient SwinUNETR...")
-    
-    model.eval()
-    device = next(model.parameters()).device
-    
-    # Create sample input
-    x = torch.randn(input_shape).to(device)
-    
-    # Measure memory usage
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-    
-    # Measure inference time
-    import time
-    
-    # Warmup
-    with torch.no_grad():
-        for _ in range(3):
-            _ = model(x)
-    
-    # Actual timing
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    
-    start_time = time.time()
-    with torch.no_grad():
-        for _ in range(10):
-            output = model(x)
-    
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    
-    end_time = time.time()
-    avg_inference_time = (end_time - start_time) / 10
-    
-    # Memory usage
-    if torch.cuda.is_available():
-        peak_memory = torch.cuda.max_memory_allocated() / 1024**3  # GB
-    else:
-        peak_memory = "N/A (CPU)"
-    
-    # Get efficiency summary
-    efficiency_summary = model.get_efficiency_summary()
-    
-    benchmark_results = {
-        "model_type": efficiency_summary["model_type"],
-        "efficiency_level": efficiency_summary["efficiency_level"],
-        "parameters": f"{efficiency_summary['parameters_mb']:.2f}M",
-        "avg_inference_time": f"{avg_inference_time:.4f}s",
-        "peak_memory_usage": f"{peak_memory:.2f}GB" if isinstance(peak_memory, float) else peak_memory,
-        "throughput": f"{1/avg_inference_time:.2f} samples/sec",
-        "parameter_reduction": efficiency_summary["parameter_reduction_vs_standard"],
-        "output_shape": list(output.shape)
-    }
-    
-    print(f"📊 Benchmark Results:")
-    for key, value in benchmark_results.items():
-        print(f"   {key.replace('_', ' ').title()}: {value}")
-    
-    return benchmark_results
-
-
-# Utility function for easy model creation in research/inference
-def create_efficient_model_for_inference(efficiency_level="balanced", checkpoint_path=None):
-    """Create an efficient model optimized for inference"""
-    
-    # Default configurations for inference
-    inference_configs = {
-        "segformer_style": {
-            "efficiency_level": "ultra",
-            "use_segformer_style": True,
-            "feature_size": 16,
-        },
-        "ultra": {
-            "efficiency_level": "ultra", 
-            "feature_size": 16,
-            "depths": (1, 1, 1, 1),
-            "num_heads": (1, 2, 4, 8),
-        },
-        "balanced": {
-            "efficiency_level": "balanced",
-            "feature_size": 24,
-            "depths": (1, 1, 2, 1),
-            "num_heads": (2, 4, 8, 16),
-        }
-    }
-    
-    config = inference_configs.get(efficiency_level, inference_configs["balanced"])
-    
-    model = BrainTumorSegmentation(
-        train_loader=None,
-        val_loader=None,
-        **config
-    )
-    
-    if checkpoint_path:
-        model.load_state_dict(torch.load(checkpoint_path))
-    
-    model.eval()
-    return model

@@ -305,10 +305,10 @@ class SegFormerStyleSwinUNETR(UltraEfficientSwinUNETR):
     def __init__(self, **kwargs):
         # Override with SegFormer3D-like parameters
         segformer_config = {
-            'feature_size': 16,  # Very small like SegFormer3D
+            'feature_size': 12,  # Changed from 16 to be divisible by 12
             'depths': (1, 1, 1, 1),  # Minimal depths
             'num_heads': (1, 2, 4, 8),  # Small attention heads
-            'decoder_channels': (64, 32, 16, 8),  # Tiny decoder
+            'decoder_channels': (48, 24, 12, 6),  # Adjusted to match feature size
             'use_depthwise_conv': True,
             'use_lightweight_decoder': True,
             'use_separable_conv': True,
@@ -330,27 +330,27 @@ def create_efficient_swinunetr(efficiency_level="balanced", **kwargs):
     if efficiency_level == "ultra":
         # ~5-8M parameters - SegFormer3D-like efficiency
         config = {
-            'feature_size': 16,
+            'feature_size': 12,  # Changed from 16 to be divisible by 12
             'depths': (1, 1, 1, 1),
             'num_heads': (1, 2, 4, 8),
-            'decoder_channels': (64, 32, 16, 8),
+            'decoder_channels': (48, 24, 12, 6),  # Adjusted to match feature size
         }
         return SegFormerStyleSwinUNETR(**{**config, **kwargs})
     
     elif efficiency_level == "high":
         # ~10-15M parameters
         config = {
-            'feature_size': 20,
+            'feature_size': 24,  # Already divisible by 12
             'depths': (1, 1, 2, 1),
             'num_heads': (2, 4, 6, 12),
-            'decoder_channels': (80, 40, 20, 10),
+            'decoder_channels': (96, 48, 24, 12),
         }
         return UltraEfficientSwinUNETR(**{**config, **kwargs})
     
     elif efficiency_level == "balanced":
         # ~15-25M parameters (your current target)
         config = {
-            'feature_size': 24,
+            'feature_size': 24,  # Already divisible by 12
             'depths': (1, 1, 2, 1),
             'num_heads': (2, 4, 8, 16),
             'decoder_channels': (96, 48, 24, 12),
@@ -360,17 +360,15 @@ def create_efficient_swinunetr(efficiency_level="balanced", **kwargs):
     elif efficiency_level == "performance":
         # ~25-35M parameters - more performance focused
         config = {
-            'feature_size': 32,
+            'feature_size': 36,  # Changed from 32 to be divisible by 12
             'depths': (2, 2, 2, 2),
             'num_heads': (3, 6, 12, 24),
-            'decoder_channels': (128, 64, 32, 16),
+            'decoder_channels': (144, 72, 36, 18),  # Adjusted to match feature size
         }
         return UltraEfficientSwinUNETR(**{**config, **kwargs})
     
     else:
         raise ValueError(f"Unknown efficiency level: {efficiency_level}")
-
-
 
 
 
