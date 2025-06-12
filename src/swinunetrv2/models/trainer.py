@@ -9,7 +9,7 @@ import wandb
 from .pipeline import HybridBrainTumorSegmentation
 
 
-def setup_hybrid_training(train_ds, val_ds, args):
+def setup_training(train_ds, val_ds, args):
     """Setup training for Hybrid SwinUNETR-SegFormer3D"""
     
     # Data loaders
@@ -106,7 +106,7 @@ def setup_hybrid_training(train_ds, val_ds, args):
     return model, trainer, train_loader, val_loader
 
 
-def train_hybrid_model(model, trainer, train_loader, val_loader):
+def train_model(model, trainer, train_loader, val_loader):
     """Train the Hybrid SwinUNETR-SegFormer3D model"""
     
     # Get model info
@@ -261,6 +261,3 @@ def get_performance_hybrid_config():
         "learning_rate": 3e-4,
         "sw_batch_size": 2,
     }
-
-# Add alias for backward compatibility
-setup_training = setup_hybrid_training
