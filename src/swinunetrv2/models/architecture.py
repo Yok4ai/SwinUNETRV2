@@ -39,17 +39,6 @@ class BrainTumorModel(nn.Module):
             dropout_path_rate=0.0,
             downsample="mergingv2"  # Use improved merging for V2
         )
-        
-        # Store training parameters
-        self.train_loader = train_loader
-        self.val_loader = val_loader
-        self.max_epochs = max_epochs
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.warmup_epochs = warmup_epochs
-        self.roi_size = roi_size
-        self.sw_batch_size = sw_batch_size
-        self.overlap = overlap
     
     def forward(self, x):
         return self.model(x)
