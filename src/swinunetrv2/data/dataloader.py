@@ -10,6 +10,7 @@ from sklearn.model_selection import train_test_split
 import json
 import os
 from monai.data import load_decathlon_datalist
+import torch
 
 def get_dataloaders(data_dir, batch_size, train_transforms, val_transforms):
     """
@@ -33,6 +34,11 @@ def get_dataloaders(data_dir, batch_size, train_transforms, val_transforms):
     train_size = int(len(datalist) * 0.8)
     train_files = datalist[:train_size]
     val_files = datalist[train_size:]
+    
+    ### Reduce training files to 30% for faster testing ###
+    reduced_train_size = int(len(train_files) * 0.3)
+    train_files = train_files[:reduced_train_size]
+    print(f"Reduced training files from {train_size} to {reduced_train_size} samples (30%)")
     
     # Create datasets
     train_ds = Dataset(data=train_files, transform=train_transforms)
