@@ -70,7 +70,7 @@ class BrainTumorSegmentation(pl.LightningModule):
             batch=False
         )
         
-        # FIXED: Use DiceCELoss with proper configuration for multi-class segmentation
+        # FIXED: Use class weights directly in the DiceCELoss
         self.dice_ce_loss = DiceCELoss(
             include_background=False,
             to_onehot_y=True,
@@ -80,7 +80,7 @@ class BrainTumorSegmentation(pl.LightningModule):
             smooth_nr=1e-5,
             smooth_dr=1e-5,
             batch=False,
-            weight=None,  # Will apply class weights manually
+            weight=self.class_weights,  # FIXED: Use class weights directly
             lambda_dice=1.0,
             lambda_ce=1.0
         )
@@ -122,36 +122,10 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Ensure labels are the right type
         labels = labels.long()
         
-        # Base DiceCE loss with proper label format
-        base_loss = self.dice_ce_loss(outputs, labels)
+        # FIXED: Simple approach - let DiceCELoss handle class weights internally
+        loss = self.dice_ce_loss(outputs, labels)
         
-        # FIXED: Apply class weights to the loss
-        # Convert outputs to probabilities
-        probs = torch.softmax(outputs, dim=1)
-        
-        # Convert labels to one-hot for class weight computation
-        labels_onehot = torch.zeros_like(outputs)
-        labels_onehot.scatter_(1, labels, 1)
-            
-        # Compute per-class weights based on presence in batch
-        class_presence = labels_onehot.sum(dim=[0, 2, 3, 4])  # Sum over batch and spatial dims
-        
-        # Apply class weights where classes are present
-        weighted_loss = base_loss
-        for i, (presence, weight) in enumerate(zip(class_presence, self.class_weights)):
-            if presence > 0:  # Only weight if class is present
-                class_mask = labels_onehot[:, i:i+1]  # Get mask for this class
-                # Use dice loss without to_onehot_y since we're providing one-hot already
-                class_dice_loss = DiceLoss(
-                    include_background=False,
-                    to_onehot_y=False,  # Already one-hot
-                    softmax=False,      # Already softmax
-                    reduction="mean"
-                )
-                class_loss = class_dice_loss(probs[:, i:i+1], class_mask[:, i:i+1])
-                weighted_loss += (weight - 1.0) * class_loss * 0.1  # Small additional weighting
-        
-        return weighted_loss
+        return loss
 
     def compute_metrics(self, outputs, labels, prefix=""):
         """Compute all dice metrics and log them"""
