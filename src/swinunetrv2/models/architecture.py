@@ -565,9 +565,11 @@ class BrainTumorSegmentation(pl.LightningModule):
             squared_pred=True,
             to_onehot_y=True,  # FIXED: Convert labels to one-hot
             softmax=True,      # FIXED: Apply softmax
-            include_background=False,  # FIXED: Exclude background
-            ce_weight=torch.tensor([1.0, 2.0, 4.0])  # FIXED: Weight rare classes more
+            include_background=False  # FIXED: Exclude background
         )
+        
+        # FIXED: Handle class weights separately
+        self.class_weights = torch.tensor([1.0, 2.0, 4.0]).to(self.device)
         
         self.dice_metric = DiceMetric(include_background=False, reduction="mean")  # FIXED: Exclude background
         self.dice_metric_batch = DiceMetric(include_background=False, reduction="mean_batch")  # FIXED: Exclude background
@@ -609,8 +611,11 @@ class BrainTumorSegmentation(pl.LightningModule):
 
         outputs = self(inputs)
         
-        # FIXED: Proper loss calculation
+        # FIXED: Proper loss calculation with class weights
         loss = self.dice_ce_loss(outputs, labels)
+        # Add weighted cross entropy loss
+        ce_loss = nn.CrossEntropyLoss(weight=self.class_weights)(outputs, labels.squeeze(1).long())
+        loss = loss + 0.5 * ce_loss  # Combine losses with weighting
         
         self.log("train_loss", loss, prog_bar=True)
 
@@ -666,8 +671,12 @@ class BrainTumorSegmentation(pl.LightningModule):
             overlap=self.overlap
         )
         
-        # FIXED: Proper validation loss calculation
+        # FIXED: Proper validation loss calculation with class weights
         val_loss = self.dice_ce_loss(val_outputs, val_labels)
+        # Add weighted cross entropy loss
+        val_ce_loss = nn.CrossEntropyLoss(weight=self.class_weights)(val_outputs, val_labels.squeeze(1).long())
+        val_loss = val_loss + 0.5 * val_ce_loss  # Combine losses with weighting
+        
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True)
         
         # FIXED: Proper validation metric calculation
