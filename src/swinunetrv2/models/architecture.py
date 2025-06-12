@@ -62,42 +62,54 @@ class HybridSwinUNETR(nn.Module):
     def _setup_segformer_decoder(self, decoder_embedding_dim, out_channels, decoder_dropout):
         """Setup SegFormer3D-style efficient decoder"""
         
-        # Calculate feature dimensions from SwinUNETR stages
-        # These match the actual SwinUNETR encoder outputs
-        feature_dims = [
-            self.feature_size,      # enc0 (original resolution)
-            self.feature_size * 2,  # enc1 
-            self.feature_size * 4,  # enc2
-            self.feature_size * 8,  # enc3
-            self.feature_size * 16, # dec4 (deepest)
-        ]
+        # We'll determine actual feature dimensions dynamically during first forward pass
+        # Store parameters for later initialization
+        self.decoder_embedding_dim = decoder_embedding_dim
+        self.decoder_dropout = decoder_dropout
+        self.out_channels = out_channels
         
-        print(f"Setting up SegFormer decoder with dims: {feature_dims}")
+        # Flag to track if decoder is initialized
+        self.decoder_initialized = False
         
-        # SegFormer3D-style MLP projections for each feature level
-        self.mlp_projections = nn.ModuleList([
-            SegFormerMLP(feature_dims[4], decoder_embedding_dim),  # dec4
-            SegFormerMLP(feature_dims[3], decoder_embedding_dim),  # enc3
-            SegFormerMLP(feature_dims[2], decoder_embedding_dim),  # enc2
-            SegFormerMLP(feature_dims[1], decoder_embedding_dim),  # enc1
-        ])
-        
-        # SegFormer3D-style fusion and final prediction
-        self.feature_fusion = nn.Sequential(
-            nn.Conv3d(4 * decoder_embedding_dim, decoder_embedding_dim, 1, bias=False),
-            nn.BatchNorm3d(decoder_embedding_dim),
-            nn.ReLU(inplace=True),
-        )
-        
-        self.dropout = nn.Dropout3d(decoder_dropout)
-        self.final_conv = nn.Conv3d(decoder_embedding_dim, out_channels, 1)
-        
-        # Final upsampling to original resolution
-        self.final_upsample = nn.Upsample(scale_factor=4, mode='trilinear', align_corners=False)
+        print(f"SegFormer decoder will be initialized dynamically on first forward pass")
         
         # Override forward method to use SegFormer decoder
         self._hook_segformer_forward()
     
+    def _initialize_decoder_layers(self, feature_dims):
+        """Initialize decoder layers with actual feature dimensions"""
+        print(f"Initializing SegFormer decoder with actual dims: {feature_dims}")
+        
+        # SegFormer3D-style MLP projections for each feature level
+        self.mlp_projections = nn.ModuleList([
+            SegFormerMLP(feature_dims[4], self.decoder_embedding_dim),  # dec4
+            SegFormerMLP(feature_dims[3], self.decoder_embedding_dim),  # enc3
+            SegFormerMLP(feature_dims[2], self.decoder_embedding_dim),  # enc2
+            SegFormerMLP(feature_dims[1], self.decoder_embedding_dim),  # enc1
+        ])
+        
+        # SegFormer3D-style fusion and final prediction
+        self.feature_fusion = nn.Sequential(
+            nn.Conv3d(4 * self.decoder_embedding_dim, self.decoder_embedding_dim, 1, bias=False),
+            nn.BatchNorm3d(self.decoder_embedding_dim),
+            nn.ReLU(inplace=True),
+        )
+        
+        self.dropout = nn.Dropout3d(self.decoder_dropout)
+        self.final_conv = nn.Conv3d(self.decoder_embedding_dim, self.out_channels, 1)
+        
+        # Final upsampling to original resolution
+        self.final_upsample = nn.Upsample(scale_factor=4, mode='trilinear', align_corners=False)
+        
+        # Move to same device as backbone
+        device = next(self.backbone.parameters()).device
+        self.mlp_projections = self.mlp_projections.to(device)
+        self.feature_fusion = self.feature_fusion.to(device)
+        self.dropout = self.dropout.to(device)
+        self.final_conv = self.final_conv.to(device)
+        self.final_upsample = self.final_upsample.to(device)
+        
+        self.decoder_initialized = True
     def _hook_segformer_forward(self):
         """Replace SwinUNETR forward with our hybrid approach"""
         original_forward = self.backbone.forward
@@ -112,6 +124,18 @@ class HybridSwinUNETR(nn.Module):
             enc2 = self.backbone.encoder3(hidden_states_out[1]) # 1/16 resolution
             enc3 = self.backbone.encoder4(hidden_states_out[2]) # 1/32 resolution
             dec4 = self.backbone.encoder10(hidden_states_out[4]) # 1/32 resolution (deepest)
+            
+            # Initialize decoder on first forward pass with actual dimensions
+            if not self.decoder_initialized:
+                feature_dims = [
+                    enc0.shape[1],  # actual enc0 channels
+                    enc1.shape[1],  # actual enc1 channels
+                    enc2.shape[1],  # actual enc2 channels
+                    enc3.shape[1],  # actual enc3 channels
+                    dec4.shape[1],  # actual dec4 channels
+                ]
+                print(f"Detected actual feature dimensions: {feature_dims}")
+                self._initialize_decoder_layers(feature_dims)
             
             # Apply SegFormer3D decoder
             return self._segformer_decode([enc0, enc1, enc2, enc3, dec4])
@@ -163,32 +187,50 @@ class HybridSwinUNETR(nn.Module):
     
     def count_parameters(self):
         """Count total trainable parameters"""
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        
+        # Add decoder parameters if they exist but aren't part of main parameters yet
+        if hasattr(self, 'mlp_projections') and hasattr(self, 'feature_fusion'):
+            decoder_total = (
+                sum(p.numel() for p in self.mlp_projections.parameters() if p.requires_grad) +
+                sum(p.numel() for p in self.feature_fusion.parameters() if p.requires_grad) +
+                sum(p.numel() for p in self.final_conv.parameters() if p.requires_grad)
+            )
+            # Only add if not already counted
+            if decoder_total not in [total]:
+                total += decoder_total
+                
+        return total
     
     def _display_parameter_info(self):
         """Display parameter information"""
-        total_params = self.count_parameters()
+        # Only show backbone info initially, decoder info will be shown after initialization
+        backbone_params = sum(p.numel() for p in self.backbone.parameters() if p.requires_grad)
         
         print(f"\n📊 Hybrid SwinUNETR-SegFormer3D:")
         print(f"   🏗️  Backbone: SwinUNETR V2 (feature_size={self.feature_size})")
-        print(f"   🎯 Decoder: SegFormer3D-style MLP decoder")
-        print(f"   📈 Total parameters: {total_params:,} ({total_params/1e6:.2f}M)")
-        
-        # Component breakdown
-        if hasattr(self, 'mlp_projections'):
-            backbone_params = sum(p.numel() for p in self.backbone.parameters() if p.requires_grad)
-            decoder_params = total_params - backbone_params
+        print(f"   🎯 Decoder: SegFormer3D-style MLP decoder (will initialize dynamically)")
+        print(f"   🔧 Backbone parameters: {backbone_params:,} ({backbone_params/1e6:.2f}M)")
+        print(f"   📋 Total parameters will be calculated after first forward pass")
+    def display_final_parameter_info(self):
+        """Display final parameter information after decoder initialization"""
+        if not self.decoder_initialized:
+            print("⚠️  Decoder not yet initialized. Run a forward pass first.")
+            return
             
-            print(f"   🔧 Backbone: {backbone_params:,} ({backbone_params/1e6:.2f}M)")
-            print(f"   🔗 SegFormer decoder: {decoder_params:,} ({decoder_params/1e6:.2f}M)")
+        total_params = self.count_parameters()
+        backbone_params = sum(p.numel() for p in self.backbone.parameters() if p.requires_grad)
+        decoder_params = total_params - backbone_params
+        
+        print(f"\n✅ Final Hybrid SwinUNETR-SegFormer3D Statistics:")
+        print(f"   📈 Total parameters: {total_params:,} ({total_params/1e6:.2f}M)")
+        print(f"   🔧 Backbone: {backbone_params:,} ({backbone_params/1e6:.2f}M)")
+        print(f"   🔗 SegFormer decoder: {decoder_params:,} ({decoder_params/1e6:.2f}M)")
         
         # Efficiency comparison
         standard_swinunetr = 62e6
         efficiency_gain = (1 - total_params / standard_swinunetr) * 100
         print(f"   📉 Parameter reduction: {efficiency_gain:.1f}% vs standard SwinUNETR")
-
-
-class SegFormerMLP(nn.Module):
     """SegFormer3D-style MLP projection module (Fixed)"""
     
     def __init__(self, input_dim, output_dim):
@@ -338,6 +380,9 @@ if __name__ == "__main__":
         print(f"\nInput shape: {x.shape}")
         print(f"Output shape: {y.shape}")
         print("✅ Fixed hybrid model working correctly!")
+        
+        # Show final parameter statistics
+        model.display_final_parameter_info()
         
     except Exception as e:
         print(f"❌ Error: {e}")
