@@ -95,8 +95,6 @@ def setup_training(train_ds, val_ds, args):
         benchmark=True,  # Optimize cudnn for consistent input sizes
         enable_model_summary=True,
         enable_checkpointing=True,
-        # Enable memory efficient attention
-        enable_flash_attention=True if hasattr(torch.backends.cuda, 'enable_flash_sdp') else False,
     )
 
     return model, trainer, train_loader, val_loader
