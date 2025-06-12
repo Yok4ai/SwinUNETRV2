@@ -8,7 +8,7 @@ from monai.transforms import Compose, Activations, AsDiscrete
 from monai.inferers import sliding_window_inference
 from monai.data import decollate_batch
 from torch.optim import AdamW
-from .hybrid_architecture import create_hybrid_swinunetr
+from .architecture import create_hybrid_swinunetr
 
 
 class HybridBrainTumorSegmentation(pl.LightningModule):
