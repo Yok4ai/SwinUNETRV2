@@ -133,16 +133,12 @@ class HybridSwinUNETR(nn.Module):
         self.dropout = nn.Dropout3d(self.decoder_dropout)
         self.final_conv = nn.Conv3d(self.decoder_embedding_dim, self.out_channels, 1)
         
-        # Final upsampling to original resolution
-        self.final_upsample = nn.Upsample(scale_factor=4, mode='trilinear', align_corners=False)
-        
         # Move to same device as backbone
         device = next(self.backbone.parameters()).device
         self.mlp_projections = self.mlp_projections.to(device)
         self.feature_fusion = self.feature_fusion.to(device)
         self.dropout = self.dropout.to(device)
         self.final_conv = self.final_conv.to(device)
-        self.final_upsample = self.final_upsample.to(device)
         
         self.decoder_initialized = True
 
@@ -190,8 +186,8 @@ class HybridSwinUNETR(nn.Module):
         """SegFormer3D-style lightweight decoding"""
         enc0, enc1, enc2, enc3, dec4 = features
         
-        # Use enc1 as reference size (1/4 of original input)
-        target_size = enc1.shape[2:]
+        # Use enc0 as reference size (1/4 of original input)
+        target_size = enc0.shape[2:]
         
         # Project all features to common embedding dimension
         projected_features = []
@@ -201,7 +197,7 @@ class HybridSwinUNETR(nn.Module):
             # Project to common dimension
             proj_feat = self.mlp_projections[i](feat)
             
-            # Upsample to target size (enc1 size)
+            # Upsample to target size (enc0 size)
             if proj_feat.shape[2:] != target_size:
                 proj_feat = torch.nn.functional.interpolate(
                     proj_feat, size=target_size, mode='trilinear', align_corners=False
@@ -216,9 +212,7 @@ class HybridSwinUNETR(nn.Module):
         # Final prediction
         output = self.final_conv(fused)
         
-        # Upsample to original input size (4x upsampling)
-        output = self.final_upsample(output)
-        
+        # No need for final upsampling since we're already at the right resolution
         return output
     
     def count_parameters(self):
