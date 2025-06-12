@@ -15,6 +15,7 @@ from pytorch_lightning.callbacks.timer import Timer
 from torch.cuda.amp import GradScaler
 import wandb
 from pytorch_lightning.loggers import WandbLogger
+from .architecture import BrainTumorSegmentationModel
 
 class BrainTumorSegmentationPipeline(pl.LightningModule):
     def __init__(self, model, train_loader, val_loader, max_epochs=100, val_interval=1, learning_rate=1e-4):
