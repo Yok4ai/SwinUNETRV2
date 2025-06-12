@@ -4,24 +4,52 @@ from monai.networks.nets import SwinUNETR
 
 
 class BrainTumorModel(nn.Module):
-    def __init__(self):
+    def __init__(
+        self,
+        train_loader=None,
+        val_loader=None,
+        max_epochs=100,
+        learning_rate=1e-4,
+        feature_size=48,
+        depths=(2, 2, 2, 2),
+        num_heads=(3, 6, 12, 24),
+        patch_size=(2, 2, 2),
+        weight_decay=1e-5,
+        warmup_epochs=5,
+        drop_rate=0.0,
+        attn_drop_rate=0.0,
+        roi_size=(128, 128, 128),
+        sw_batch_size=4,
+        overlap=0.5
+    ):
         super().__init__()
         # SwinUNETR-V2 Configuration
         self.model = SwinUNETR(
             in_channels=4,
             out_channels=3,
-            feature_size=48,
+            feature_size=feature_size,
             use_checkpoint=True,
             use_v2=True,  # Enable SwinUNETR-V2!
             spatial_dims=3,
-            depths=(2, 2, 2, 2),
-            num_heads=(3, 6, 12, 24),
+            depths=depths,
+            num_heads=num_heads,
             norm_name="instance",
-            drop_rate=0.0,
-            attn_drop_rate=0.0,
+            drop_rate=drop_rate,
+            attn_drop_rate=attn_drop_rate,
             dropout_path_rate=0.0,
             downsample="mergingv2"  # Use improved merging for V2
         )
+        
+        # Store training parameters
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.max_epochs = max_epochs
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.warmup_epochs = warmup_epochs
+        self.roi_size = roi_size
+        self.sw_batch_size = sw_batch_size
+        self.overlap = overlap
     
     def forward(self, x):
         return self.model(x)
