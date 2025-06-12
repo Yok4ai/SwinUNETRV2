@@ -7,8 +7,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-def create_hybrid_args(preset="balanced"):
-    """Create arguments for Hybrid SwinUNETR-SegFormer3D"""
+def create_hybrid_args(preset="light"):
+    """Create arguments for Hybrid SwinUNETR-SegFormer3D with memory optimization"""
     
     # Get preset configuration
     from swinunetrv2.models.pipeline import get_hybrid_config
@@ -18,22 +18,22 @@ def create_hybrid_args(preset="balanced"):
         # Data parameters
         input_dir='/kaggle/working',
         batch_size=config["batch_size"],
-        num_workers=4,
+        num_workers=2,  # Reduced from 4
         pin_memory=True,
         
         # Model parameters - HYBRID SPECIFIC
-        img_size=128,
+        img_size=96,  # Reduced from 128
         in_channels=4,
         out_channels=3,
         
         # Hybrid configuration
         efficiency_level=config["efficiency_level"],
-        use_segformer_decoder=True,  # This is what makes it hybrid
+        use_segformer_decoder=True,
         decoder_embedding_dim=config["decoder_embedding_dim"],
         
-        # SwinUNETR backbone parameters (will be set by efficiency_level)
-        feature_size=36,  # Will be overridden by efficiency_level
-        depths=(1, 1, 2, 1),
+        # SwinUNETR backbone parameters
+        feature_size=24,  # Reduced default
+        depths=(1, 1, 1, 1),  # Reduced default
         num_heads=(2, 4, 8, 16),
         
         # Training parameters
@@ -51,17 +51,17 @@ def create_hybrid_args(preset="balanced"):
         early_stopping_patience=15,
         
         # Inference parameters
-        roi_size=[128, 128, 128],
-        sw_batch_size=config["sw_batch_size"],
-        overlap=0.25,
+        roi_size=[96, 96, 96],  # Reduced from 128
+        sw_batch_size=1,  # Reduced from 2
+        overlap=0.15,  # Reduced from 0.25
         
         # Architecture parameters
         drop_rate=0.1,
         attn_drop_rate=0.1,
         dropout_path_rate=0.1,
-        decoder_dropout=0.0,  # SegFormer decoder dropout
+        decoder_dropout=0.0,
         use_checkpoint=True,
-        use_v2=True,  # Important: Use V2 merging
+        use_v2=True,
         norm_name="instance",
     )
 
@@ -80,7 +80,7 @@ def run_hybrid_training():
         print("🔥 GPU optimized!")
     
     # Create hybrid configuration
-    args = create_hybrid_args(preset="balanced")  # Change to "light" or "performance" as needed
+    args = create_hybrid_args(preset="light")  # Changed from "balanced" to "light"
     
     print(f"\n🚀 HYBRID SWINUNETR-SEGFORMER3D")
     print(f"🏗️  Backbone: SwinUNETR V2 (feature_size will be set by efficiency_level)")

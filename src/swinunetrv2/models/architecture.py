@@ -183,14 +183,14 @@ class HybridSwinUNETR(nn.Module):
             return self.backbone(x)
     
     def _segformer_decode(self, features):
-        """SegFormer3D-style lightweight decoding"""
+        """SegFormer3D-style lightweight decoding with memory optimization"""
         enc0, enc1, enc2, enc3, dec4 = features
         
         # Use enc0 as reference size (1/4 of original input)
         target_size = enc0.shape[2:]
         
-        # Project all features to common embedding dimension
-        projected_features = []
+        # Process features one at a time to reduce memory usage
+        fused_features = []
         feature_list = [dec4, enc3, enc2, enc1]  # From deepest to shallowest
         
         for i, feat in enumerate(feature_list):
@@ -202,17 +202,31 @@ class HybridSwinUNETR(nn.Module):
                 proj_feat = torch.nn.functional.interpolate(
                     proj_feat, size=target_size, mode='trilinear', align_corners=False
                 )
-            projected_features.append(proj_feat)
+            
+            # Process and store immediately to free memory
+            fused_features.append(proj_feat)
+            
+            # Clear CUDA cache after each feature processing
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         
-        # Concatenate and fuse features (SegFormer3D style)
-        fused = torch.cat(projected_features, dim=1)
+        # Concatenate features in smaller chunks
+        chunk_size = 2
+        fused_chunks = []
+        for i in range(0, len(fused_features), chunk_size):
+            chunk = torch.cat(fused_features[i:i + chunk_size], dim=1)
+            fused_chunks.append(chunk)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        # Final fusion
+        fused = torch.cat(fused_chunks, dim=1)
         fused = self.feature_fusion(fused)
         fused = self.dropout(fused)
         
         # Final prediction
         output = self.final_conv(fused)
         
-        # No need for final upsampling since we're already at the right resolution
         return output
     
     def count_parameters(self):

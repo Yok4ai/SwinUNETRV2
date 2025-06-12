@@ -19,12 +19,12 @@ class HybridBrainTumorSegmentation(pl.LightningModule):
         max_epochs=50, 
         learning_rate=1e-4,
         # Hybrid model parameters
-        efficiency_level="balanced",  # "light", "balanced", "performance"
-        decoder_embedding_dim=128,
+        efficiency_level="light",  # Default to light
+        decoder_embedding_dim=96,  # Reduced default
         use_segformer_decoder=True,
         # SwinUNETR backbone parameters
-        feature_size=36,
-        depths=(1, 1, 2, 1),
+        feature_size=24,  # Reduced default
+        depths=(1, 1, 1, 1),  # Reduced default
         num_heads=(2, 4, 8, 16),
         # Training parameters
         weight_decay=1e-5,
@@ -34,9 +34,9 @@ class HybridBrainTumorSegmentation(pl.LightningModule):
         dropout_path_rate=0.1,
         decoder_dropout=0.0,
         # Inference parameters
-        roi_size=(128, 128, 128),
-        sw_batch_size=2,
-        overlap=0.25,
+        roi_size=(96, 96, 96),  # Reduced from 128
+        sw_batch_size=1,  # Reduced from 2
+        overlap=0.15,  # Reduced from 0.25
         use_mixed_precision=True,
         norm_name="instance",
         use_checkpoint=True,
