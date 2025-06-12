@@ -1,4 +1,4 @@
-# architecture.py - SwinUNETR V2 + SegFormer3D Decoder
+# architecture.py - SwinUNETR V2 + SegFormer3D Decoder (Fixed)
 import torch
 import torch.nn as nn
 from monai.networks.nets import SwinUNETR
@@ -189,24 +189,27 @@ class HybridSwinUNETR(nn.Module):
 
 
 class SegFormerMLP(nn.Module):
-    """SegFormer3D-style MLP projection module"""
+    """SegFormer3D-style MLP projection module (Fixed)"""
     
     def __init__(self, input_dim, output_dim):
         super().__init__()
-        # Ensure input dimension is divisible by 12
-        if input_dim % 12 != 0:
-            input_dim = (input_dim // 12) * 12
+        # Use actual input dimension - no artificial constraints
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        
+        # Simple linear projection with proper dimension handling
         self.proj = nn.Linear(input_dim, output_dim)
         self.norm = nn.LayerNorm(output_dim)
+        
+        print(f"  MLP: {input_dim} -> {output_dim}")
     
     def forward(self, x):
         # x: (B, C, D, H, W) -> (B, D*H*W, C) -> (B, D*H*W, output_dim) -> (B, output_dim, D, H, W)
         B, C, D, H, W = x.shape
         
-        # Ensure input channels are divisible by 12
-        if C % 12 != 0:
-            C = (C // 12) * 12
-            x = x[:, :C]
+        # Verify input channels match expected
+        if C != self.input_dim:
+            raise ValueError(f"Input channels {C} don't match expected {self.input_dim}")
         
         # Flatten spatial dimensions and apply MLP
         x = x.flatten(2).transpose(1, 2)  # (B, D*H*W, C)
@@ -214,7 +217,7 @@ class SegFormerMLP(nn.Module):
         x = self.norm(x)                  # (B, D*H*W, output_dim)
         
         # Reshape back to spatial format
-        x = x.transpose(1, 2).reshape(B, -1, D, H, W)  # (B, output_dim, D, H, W)
+        x = x.transpose(1, 2).reshape(B, self.output_dim, D, H, W)
         
         return x
 
@@ -237,19 +240,19 @@ def create_hybrid_swinunetr(
     
     configs = {
         "light": {
-            "feature_size": 24,  # Divisible by 12
+            "feature_size": 24,
             "depths": (1, 1, 1, 1),
             "num_heads": (2, 4, 8, 16),
             "decoder_embedding_dim": 96,
         },
         "balanced": {
-            "feature_size": 36,  # Divisible by 12
+            "feature_size": 36,
             "depths": (1, 1, 2, 1),
             "num_heads": (2, 4, 8, 16),
             "decoder_embedding_dim": 128,
         },
         "performance": {
-            "feature_size": 48,  # Divisible by 12
+            "feature_size": 48,
             "depths": (2, 2, 2, 2),
             "num_heads": (3, 6, 12, 24),
             "decoder_embedding_dim": 192,
@@ -267,17 +270,75 @@ def create_hybrid_swinunetr(
     return HybridSwinUNETR(**config)
 
 
+# Debug function to check feature dimensions
+def debug_feature_dimensions(model, input_shape=(1, 4, 128, 128, 128)):
+    """Debug function to check actual feature dimensions"""
+    print("\n🔍 Debugging feature dimensions:")
+    
+    # Create a dummy input
+    x = torch.randn(*input_shape)
+    
+    # Hook to capture feature shapes
+    feature_shapes = {}
+    
+    def get_activation(name):
+        def hook(model, input, output):
+            if isinstance(output, torch.Tensor):
+                feature_shapes[name] = output.shape
+        return hook
+    
+    # Register hooks for encoder layers
+    handles = []
+    if hasattr(model.backbone, 'encoder1'):
+        handles.append(model.backbone.encoder1.register_forward_hook(get_activation('enc1')))
+    if hasattr(model.backbone, 'encoder2'):
+        handles.append(model.backbone.encoder2.register_forward_hook(get_activation('enc2')))
+    if hasattr(model.backbone, 'encoder3'):
+        handles.append(model.backbone.encoder3.register_forward_hook(get_activation('enc3')))
+    if hasattr(model.backbone, 'encoder4'):
+        handles.append(model.backbone.encoder4.register_forward_hook(get_activation('enc4')))
+    if hasattr(model.backbone, 'encoder10'):
+        handles.append(model.backbone.encoder10.register_forward_hook(get_activation('enc10')))
+    
+    # Forward pass
+    try:
+        with torch.no_grad():
+            _ = model(x)
+        
+        print("Feature shapes:")
+        for name, shape in feature_shapes.items():
+            print(f"  {name}: {shape}")
+            
+    except Exception as e:
+        print(f"Error during forward pass: {e}")
+        print("Feature shapes captured so far:")
+        for name, shape in feature_shapes.items():
+            print(f"  {name}: {shape}")
+    
+    # Clean up hooks
+    for handle in handles:
+        handle.remove()
+
+
 if __name__ == "__main__":
     # Test the hybrid model
-    print("Testing Hybrid SwinUNETR-SegFormer3D:")
+    print("Testing Fixed Hybrid SwinUNETR-SegFormer3D:")
     
     model = create_hybrid_swinunetr(efficiency_level="balanced")
     
+    # Debug feature dimensions first
+    debug_feature_dimensions(model)
+    
     # Test forward pass
     x = torch.randn(1, 4, 128, 128, 128)
-    with torch.no_grad():
-        y = model(x)
-    
-    print(f"Input shape: {x.shape}")
-    print(f"Output shape: {y.shape}")
-    print("✅ Hybrid model working correctly!")
+    try:
+        with torch.no_grad():
+            y = model(x)
+        
+        print(f"\nInput shape: {x.shape}")
+        print(f"Output shape: {y.shape}")
+        print("✅ Fixed hybrid model working correctly!")
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        print("This error will help us further debug the model.")
