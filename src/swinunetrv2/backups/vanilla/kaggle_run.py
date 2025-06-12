@@ -1,5 +1,4 @@
 # run.py
-
 from swinunetrv2.kaggle_setup import setup_kaggle_notebook
 from swinunetrv2.main import main
 import argparse
@@ -53,13 +52,13 @@ args = argparse.Namespace(
     persistent_workers=False,
     
     # Model parameters
-    img_size=96,
+    img_size=64,
     in_channels=4,
     out_channels=3,
-    feature_size=48,
+    feature_size=24,
     depths=[2, 2, 6, 2],
     num_heads=[3, 6, 12, 24],
-    patch_size=4,
+    patch_size=2,
     drop_rate=0.1,
     attn_drop_rate=0.1,
     use_checkpoint=True,
@@ -72,7 +71,7 @@ args = argparse.Namespace(
     device='cuda',
     use_amp=True,
     gradient_clip_val=1.0,
-    accumulate_grad_batches=4,  # Increased for effective batch size
+    accumulate_grad_batches=2,  # Increased for effective batch size
     
     # Validation settings
     val_interval=1,
@@ -81,8 +80,8 @@ args = argparse.Namespace(
     limit_val_batches=10,  # Increased for better validation
     
     # Inference parameters
-    roi_size=[128, 128, 128],
-    sw_batch_size=2,
+    roi_size=[96, 96, 96],
+    sw_batch_size=1,
     overlap=0.25,
 )
 

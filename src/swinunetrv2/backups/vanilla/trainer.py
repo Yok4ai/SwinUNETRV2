@@ -89,7 +89,6 @@ def setup_training(train_ds, val_ds, args):
         enable_progress_bar=True,
         enable_model_summary=True,
         detect_anomaly=True,
-        strategy='auto'
     )
 
     return model, trainer, train_loader, val_loader

@@ -6,8 +6,6 @@ from monai.networks.nets import SwinUNETR
 class BrainTumorModel(nn.Module):
     def __init__(
         self,
-        train_loader=None,
-        val_loader=None,
         max_epochs=30,
         learning_rate=1e-4,
         feature_size=24,

@@ -58,18 +58,22 @@ class BrainTumorSegmentation(pl.LightningModule):
             dropout_path_rate=0.0,
             downsample="mergingv2"  # Use improved merging for V2
         )
-        # Loss and metrics
         self.loss_function = DiceLoss(smooth_nr=0, smooth_dr=1e-5, squared_pred=True, to_onehot_y=False, sigmoid=True)
+                
+        #Standard Dice Loss Metrics
         self.dice_metric = DiceMetric(include_background=True, reduction="mean")
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
+
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
 
-        # Data loaders
+        # self.scaler = torch.cuda.amp.GradScaler()
+        
+        self.best_metric = -1
         self.train_loader = train_loader
         self.val_loader = val_loader
-        
-        # Best metric tracking
-        self.best_metric = -1
+
+        # # Validation Interval
+        # self.full_val_interval = 15
 
         # Training metrics
         self.avg_train_loss_values = []
@@ -102,6 +106,7 @@ class BrainTumorSegmentation(pl.LightningModule):
 
         # Apply sigmoid and threshold (same as validation)
         outputs = [self.post_trans(i) for i in decollate_batch(outputs)]
+        # outputs_tensor = torch.stack(outputs)  # Convert back to a tensor
         
         # Compute Dice
         self.dice_metric(y_pred=outputs, y=labels)
@@ -160,7 +165,14 @@ class BrainTumorSegmentation(pl.LightningModule):
         val_dice = self.dice_metric.aggregate().item()
         self.log("val_mean_dice", val_dice, prog_bar=True)
     
-        return {"val_loss": val_loss}
+        return {"val_loss": val_loss}  # Return val_loss to be used in aggregation
+
+    # def val_batch_switcher(self):
+    #     # Switch between small and full validation batch dynamically
+    #     if self.current_epoch % self.full_val_interval == 0:
+    #         self.trainer.limit_val_batch = 1.0
+    #     else:
+    #         self.trainer.limit_val_batch = 0.3
 
     def on_validation_epoch_end(self):
         # Store Dice Mean
@@ -168,6 +180,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.metric_values.append(val_dice)
 
         # Store Validation Loss 
+        # val_loss = self.trainer.logged_metrics.get("val_loss", torch.tensor(0.0))
         val_loss = self.trainer.logged_metrics["val_loss"].item()
         self.epoch_loss_values.append(val_loss)
 
@@ -202,12 +215,13 @@ class BrainTumorSegmentation(pl.LightningModule):
     def on_train_end(self):
         # Print the best metric and epoch along with individual Dice scores at the end of training
         print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}, "
-              f"tc: {self.metric_values_tc[-1]:.4f}, "
-              f"wt: {self.metric_values_wt[-1]:.4f}, "
-              f"et: {self.metric_values_et[-1]:.4f}.")
+            f"tc: {self.metric_values_tc[-1]:.4f}, "
+            f"wt: {self.metric_values_wt[-1]:.4f}, "
+            f"et: {self.metric_values_et[-1]:.4f}.")
 
     def configure_optimizers(self):
         # SwinUNETR-V2 benefits from slightly higher learning rate
         optimizer = AdamW(self.model.parameters(), lr=self.hparams.learning_rate, weight_decay=1e-5)
+        
         scheduler = CosineAnnealingLR(optimizer, T_max=self.hparams.max_epochs)
         return [optimizer], [scheduler]
