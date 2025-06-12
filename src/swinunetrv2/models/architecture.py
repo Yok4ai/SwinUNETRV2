@@ -16,7 +16,7 @@ class HybridSwinUNETR(nn.Module):
         self,
         in_channels: int = 4,
         out_channels: int = 3,
-        feature_size: int = 24,
+        feature_size: int = 36,
         depths: tuple = (1, 1, 2, 1),
         num_heads: tuple = (2, 4, 8, 16),
         use_checkpoint: bool = True,
@@ -30,6 +30,7 @@ class HybridSwinUNETR(nn.Module):
         decoder_embedding_dim: int = 128,
         decoder_dropout: float = 0.0,
         use_segformer_decoder: bool = True,
+        **kwargs  # Allow extra parameters
     ):
         super().__init__()
         
