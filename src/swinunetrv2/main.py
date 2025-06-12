@@ -57,8 +57,6 @@ if __name__ == "__main__":
     parser.add_argument("--in_channels", type=int, default=4, help="Number of input channels (4 for BraTS)")
     parser.add_argument("--out_channels", type=int, default=3, help="Number of output channels (3 for BraTS)")
     parser.add_argument("--feature_size", type=int, default=24, help="Feature size")
-    parser.add_argument("--depths", type=int, nargs='+', default=[1, 1, 1, 1], help="Depths of each stage")
-    parser.add_argument("--num_heads", type=int, nargs='+', default=[3, 6, 12, 24], help="Number of attention heads")
     parser.add_argument("--drop_rate", type=float, default=0.1, help="Dropout rate")
     parser.add_argument("--attn_drop_rate", type=float, default=0.1, help="Attention dropout rate")
     parser.add_argument("--use_checkpoint", action="store_true", help="Use checkpoint for memory efficiency")
