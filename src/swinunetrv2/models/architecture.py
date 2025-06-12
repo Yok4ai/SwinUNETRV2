@@ -53,11 +53,11 @@ def create_swinunetr_model(args):
         out_channels=args.out_channels,
         feature_size=args.feature_size,
         use_checkpoint=args.use_checkpoint,
-        use_v2=True,  # Enable SwinUNETR-V2!
-        spatial_dims=3,
-        norm_name="instance",
+        # use_v2=True,  # Enable SwinUNETR-V2!
+        # spatial_dims=3,
+        # norm_name="instance",
         drop_rate=args.drop_rate,
         attn_drop_rate=args.attn_drop_rate,
         dropout_path_rate=0.0,
-        downsample="mergingv2"  # Use improved merging for V2
+        # downsample="mergingv2"  # Use improved merging for V2
     )
