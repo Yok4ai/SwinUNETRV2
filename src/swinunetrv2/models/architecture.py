@@ -5,6 +5,40 @@ from monai.networks.nets import SwinUNETR
 import math
 
 
+class SegFormerMLP(nn.Module):
+    """SegFormer3D-style MLP projection module (Fixed)"""
+    
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        # Use actual input dimension - no artificial constraints
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        
+        # Simple linear projection with proper dimension handling
+        self.proj = nn.Linear(input_dim, output_dim)
+        self.norm = nn.LayerNorm(output_dim)
+        
+        print(f"  MLP: {input_dim} -> {output_dim}")
+    
+    def forward(self, x):
+        # x: (B, C, D, H, W) -> (B, D*H*W, C) -> (B, D*H*W, output_dim) -> (B, output_dim, D, H, W)
+        B, C, D, H, W = x.shape
+        
+        # Verify input channels match expected
+        if C != self.input_dim:
+            raise ValueError(f"Input channels {C} don't match expected {self.input_dim}")
+        
+        # Flatten spatial dimensions and apply MLP
+        x = x.flatten(2).transpose(1, 2)  # (B, D*H*W, C)
+        x = self.proj(x)                  # (B, D*H*W, output_dim)
+        x = self.norm(x)                  # (B, D*H*W, output_dim)
+        
+        # Reshape back to spatial format
+        x = x.transpose(1, 2).reshape(B, self.output_dim, D, H, W)
+        
+        return x
+
+
 class HybridSwinUNETR(nn.Module):
     """
     Hybrid model combining:
@@ -111,6 +145,7 @@ class HybridSwinUNETR(nn.Module):
         self.final_upsample = self.final_upsample.to(device)
         
         self.decoder_initialized = True
+
     def _hook_segformer_forward(self):
         """Replace SwinUNETR forward with our hybrid approach"""
         original_forward = self.backbone.forward
@@ -213,6 +248,7 @@ class HybridSwinUNETR(nn.Module):
         print(f"   🎯 Decoder: SegFormer3D-style MLP decoder (will initialize dynamically)")
         print(f"   🔧 Backbone parameters: {backbone_params:,} ({backbone_params/1e6:.2f}M)")
         print(f"   📋 Total parameters will be calculated after first forward pass")
+
     def display_final_parameter_info(self):
         """Display final parameter information after decoder initialization"""
         if not self.decoder_initialized:
@@ -232,37 +268,6 @@ class HybridSwinUNETR(nn.Module):
         standard_swinunetr = 62e6
         efficiency_gain = (1 - total_params / standard_swinunetr) * 100
         print(f"   📉 Parameter reduction: {efficiency_gain:.1f}% vs standard SwinUNETR")
-    """SegFormer3D-style MLP projection module (Fixed)"""
-    
-    def __init__(self, input_dim, output_dim):
-        super().__init__()
-        # Use actual input dimension - no artificial constraints
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        
-        # Simple linear projection with proper dimension handling
-        self.proj = nn.Linear(input_dim, output_dim)
-        self.norm = nn.LayerNorm(output_dim)
-        
-        print(f"  MLP: {input_dim} -> {output_dim}")
-    
-    def forward(self, x):
-        # x: (B, C, D, H, W) -> (B, D*H*W, C) -> (B, D*H*W, output_dim) -> (B, output_dim, D, H, W)
-        B, C, D, H, W = x.shape
-        
-        # Verify input channels match expected
-        if C != self.input_dim:
-            raise ValueError(f"Input channels {C} don't match expected {self.input_dim}")
-        
-        # Flatten spatial dimensions and apply MLP
-        x = x.flatten(2).transpose(1, 2)  # (B, D*H*W, C)
-        x = self.proj(x)                  # (B, D*H*W, output_dim)
-        x = self.norm(x)                  # (B, D*H*W, output_dim)
-        
-        # Reshape back to spatial format
-        x = x.transpose(1, 2).reshape(B, self.output_dim, D, H, W)
-        
-        return x
 
 
 # Factory function for easy usage
