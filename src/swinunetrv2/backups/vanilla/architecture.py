@@ -8,9 +8,9 @@ class BrainTumorModel(nn.Module):
         self,
         train_loader=None,
         val_loader=None,
-        max_epochs=30,
+        max_epochs=100,
         learning_rate=1e-4,
-        feature_size=24,
+        feature_size=48,
         depths=(2, 2, 2, 2),
         num_heads=(3, 6, 12, 24),
         patch_size=(2, 2, 2),
@@ -18,8 +18,8 @@ class BrainTumorModel(nn.Module):
         warmup_epochs=5,
         drop_rate=0.0,
         attn_drop_rate=0.0,
-        roi_size=(96, 96, 96),
-        sw_batch_size=1,
+        roi_size=(128, 128, 128),
+        sw_batch_size=4,
         overlap=0.5
     ):
         super().__init__()

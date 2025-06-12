@@ -47,13 +47,13 @@ if __name__ == "__main__":
     
     # Data parameters
     parser.add_argument("--input_dir", type=str, required=True, help="Input directory containing data")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for training")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size for training")
     parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for data loading")
     parser.add_argument("--pin_memory", action="store_true", default=True, help="Enable pin memory for faster GPU transfer")
-    parser.add_argument("--persistent_workers", action="store_true", default=False, help="Keep workers alive between epochs")
+    parser.add_argument("--persistent_workers", action="store_true", default=True, help="Keep workers alive between epochs")
     
     # Model parameters
-    parser.add_argument("--img_size", type=int, default=96, help="Input image size")
+    parser.add_argument("--img_size", type=int, default=128, help="Input image size")
     parser.add_argument("--in_channels", type=int, default=4, help="Number of input channels (4 for BraTS)")
     parser.add_argument("--out_channels", type=int, default=3, help="Number of output channels (3 for BraTS)")
     parser.add_argument("--feature_size", type=int, default=48, help="Feature size")
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     parser.add_argument("--early_stopping_patience", type=int, default=15, help="Early stopping patience")
     
     # Inference parameters
-    parser.add_argument("--roi_size", type=int, nargs='+', default=[96, 96, 96], help="ROI size for sliding window inference")
+    parser.add_argument("--roi_size", type=int, nargs='+', default=[128, 128, 128], help="ROI size for sliding window inference")
     parser.add_argument("--sw_batch_size", type=int, default=2, help="Sliding window batch size")
     parser.add_argument("--overlap", type=float, default=0.25, help="Overlap for sliding window inference")
     
