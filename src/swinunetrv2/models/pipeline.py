@@ -364,34 +364,77 @@ class BrainTumorSegmentation(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def get_efficiency_summary(self):
-        """Get detailed efficiency summary of the model"""
+        """Get detailed efficiency summary"""
         total_params = self.model.count_parameters()
-        standard_params = 62e6  # Standard MONAI SwinUNETR
         
-        # Calculate efficiency metrics
-        efficiency_ratio = total_params / standard_params
-        parameter_reduction = f"{(1-efficiency_ratio)*100:.1f}%"
-        
-        # Estimate memory usage
-        memory_per_sample = 0.4 if self.hparams.feature_size <= 24 else 0.6
-        estimated_memory = 1.5 + (self.hparams.batch_size * memory_per_sample)
-        
-        return {
+        summary = {
             "model_type": "Ultra-Efficient SwinUNETR",
-            "efficiency_level": self.hparams.efficiency_level,
-            "segformer_style": self.hparams.use_segformer_style,
-            "feature_size": self.hparams.feature_size,
-            "depths": self.hparams.depths,
-            "num_heads": self.hparams.num_heads,
-            "decoder_channels": self.hparams.decoder_channels,
+            "efficiency_level": getattr(self.hparams, 'efficiency_level', 'custom'),
             "total_parameters": total_params,
             "parameters_mb": total_params / 1e6,
-            "parameter_reduction_vs_standard": parameter_reduction,
-            "estimated_memory_gb": f"{estimated_memory:.1f}",
-            "efficiency_comparison": {
-                "vs_standard_swinunetr": parameter_reduction,
-                "vs_segformer3d": "Similar efficiency range (5-25M parameters)",
-                "vs_unet3d": "~50-70% fewer parameters",
-                "vs_nnunet": "~40-80% fewer parameters"
-            }
+            "feature_size": getattr(self.hparams, 'feature_size', 'N/A'),
+            "depths": getattr(self.hparams, 'depths', 'N/A'),
+            "num_heads": getattr(self.hparams, 'num_heads', 'N/A'),
+            "decoder_channels": getattr(self.hparams, 'decoder_channels', 'N/A'),
+            "segformer_style": getattr(self.hparams, 'use_segformer_style', False),
+            "parameter_reduction_vs_standard": f"{(1 - total_params / 62e6) * 100:.1f}%",
+            "estimated_memory_gb": f"{total_params * 4 / 1e9:.2f}"
         }
+        
+        return summary
+
+
+# Enhanced efficiency configurations for easy selection
+def get_ultra_lightweight_config():
+    """SegFormer3D-style ultra lightweight - ~5-8M parameters"""
+    return {
+        "efficiency_level": "ultra",
+        "use_segformer_style": True,
+        "batch_size": 8,
+        "accumulate_grad_batches": 2,  # effective batch = 16
+        "learning_rate": 1e-3,  # Higher LR for smaller model
+        "sw_batch_size": 4,  # Can afford larger sliding window batch
+    }
+
+def get_high_efficiency_config():
+    """High efficiency - ~10-15M parameters"""
+    return {
+        "efficiency_level": "high",
+        "batch_size": 6,
+        "accumulate_grad_batches": 2,  # effective batch = 12
+        "learning_rate": 8e-4,
+        "sw_batch_size": 3,
+    }
+
+def get_balanced_efficiency_config():
+    """Balanced efficiency - ~15-25M parameters"""
+    return {
+        "efficiency_level": "balanced",
+        "batch_size": 4,
+        "accumulate_grad_batches": 3,  # effective batch = 12
+        "learning_rate": 5e-4,
+        "sw_batch_size": 2,
+    }
+
+def get_performance_efficiency_config():
+    """Performance focused - ~25-35M parameters"""
+    return {
+        "efficiency_level": "performance",
+        "batch_size": 3,
+        "accumulate_grad_batches": 4,  # effective batch = 12
+        "learning_rate": 3e-4,
+        "sw_batch_size": 2,
+    }
+
+def get_custom_segformer_config():
+    """Custom SegFormer3D-inspired configuration"""
+    return {
+        "efficiency_level": "balanced",
+        "feature_size": 12,  # Like SegFormer3D
+        "depths": (1, 1, 1, 1),  # Minimal depths
+        "num_heads": (1, 2, 4, 8),  # Small attention heads
+        "decoder_channels": (64, 32, 16, 8),  # Tiny decoder
+        "batch_size": 6,
+        "accumulate_grad_batches": 2,
+        "learning_rate": 1e-3,
+    }
