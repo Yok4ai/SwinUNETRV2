@@ -1,5 +1,5 @@
-# improved_run.py
-# Import necessary modules
+# run.py
+
 from swinunetrv2.kaggle_setup import setup_kaggle_notebook
 from swinunetrv2.main import main
 import argparse
@@ -36,27 +36,41 @@ def optimize_gpu_usage():
     
     print("🔥 Enhanced GPU optimizations applied!")
 
+def estimate_parameters(args):
+    """Estimate model parameters"""
+    # Rough estimation for SwinUNETR with given parameters
+    embed_dim = args.embed_dim
+    depths = args.depths
+    
+    # Encoder parameters (rough estimate)
+    encoder_params = embed_dim * embed_dim * 8  # Patch embedding
+    for i, depth in enumerate(depths):
+        layer_dim = embed_dim * (2 ** i)
+        encoder_params += depth * layer_dim * layer_dim * 12  # Attention + MLP
+    
+    # Decoder parameters
+    decoder_params = args.decoder_embed_dim * sum([embed_dim * (2**i) for i in range(len(depths))])
+    decoder_params += args.decoder_embed_dim * args.decoder_embed_dim * 4
+    
+    return encoder_params + decoder_params
+
 def print_model_comparison():
-    """Print comparison between your original and improved model"""
+    """Print model comparison"""
     print("\n" + "="*60)
-    print("📊 MODEL ARCHITECTURE COMPARISON")
+    print("🎯 FIXED LIGHTWEIGHT SWINUNETR vs ORIGINAL")
     print("="*60)
-    print(f"{'Parameter':<20} {'Original':<15} {'Improved':<15} {'Change':<15}")
-    print("-" * 60)
-    print(f"{'Embed Dim':<20} {'48':<15} {'64':<15} {'+33%':<15}")
-    print(f"{'Depths':<20} {'[2,2,6,2]':<15} {'[2,2,6,2]':<15} {'Same':<15}")
-    print(f"{'Num Heads':<20} {'[3,6,12,24]':<15} {'[2,4,8,16]':<15} {'Optimized':<15}")
-    print(f"{'Window Size':<20} {'7':<15} {'4':<15} {'Smaller':<15}")
-    print(f"{'Decoder Dim':<20} {'256':<15} {'128':<15} {'Efficient':<15}")
-    print(f"{'MLP Ratio':<20} {'4.0':<15} {'2.0':<15} {'Reduced':<15}")
-    print(f"{'Learning Rate':<20} {'2e-3':<15} {'8e-4':<15} {'Stable':<15}")
-    print(f"{'Warmup Epochs':<20} {'5':<15} {'10':<15} {'Extended':<15}")
-    print("="*60)
-    print("🎯 Expected Improvements:")
-    print("   • Better parameter efficiency")
-    print("   • More stable training")
-    print("   • Higher dice scores")
-    print("   • Better memory usage")
+    print("FIXES APPLIED:")
+    print("✅ Standard SwinUNETR embedding dimension (96 instead of 64)")
+    print("✅ Proper head scaling [3,6,12,24] instead of [2,4,8,16]")
+    print("✅ Standard window size (7 instead of 4)")
+    print("✅ Standard MLP ratio (4.0 instead of 2.0)")
+    print("✅ DiceCELoss with class weighting for rare classes")
+    print("✅ Fixed post-processing for multi-class segmentation")
+    print("✅ Proper one-hot label conversion")
+    print("✅ Exclude background from Dice metrics")
+    print("✅ Conservative learning rate (5e-4 instead of 1e-3)")
+    print("✅ Reduced weight decay (1e-5 instead of 1e-4)")
+    print("✅ Larger decoder dimension (256 instead of 128)")
     print("="*60)
 
 # Setup the environment and prepare data
@@ -69,58 +83,57 @@ optimize_gpu_usage()
 # Print model comparison
 print_model_comparison()
 
-# 🎯 IMPROVED CONFIGURATION FOR BETTER PERFORMANCE
+# 🎯 FIXED CONFIGURATION FOR BETTER PERFORMANCE
 args = argparse.Namespace(
     # Data parameters - keeping your working values
     input_dir='/kaggle/working',
-    batch_size=6,  # Slightly reduced for improved model
+    batch_size=4,  # FIXED: Reduced batch size for stability
     num_workers=4,
     pin_memory=True,
     persistent_workers=False,  # Disabled to fix pickling error
     
-    # 🚀 IMPROVED MODEL PARAMETERS
+    # 🚀 FIXED MODEL PARAMETERS (Standard SwinUNETR)
     img_size=128,
     in_channels=4,  # 4 modalities for BraTS
     out_channels=3,  # 3 tumor regions
-    feature_size=64,  # Increased from 48
-    embed_dim=64,    # Increased from 48 for better representation
+    feature_size=96,  # FIXED: Standard SwinUNETR dimension
+    embed_dim=96,    # FIXED: Standard SwinUNETR embedding dimension
     depths=[2, 2, 6, 2],  # Keep proven architecture
-    num_heads=[2, 4, 8, 16],  # More efficient head distribution
-    window_size=4,    # Reduced from 7 for efficiency
-    mlp_ratio=2.0,    # Reduced from 4.0 for efficiency
-    decoder_embed_dim=128,  # Reduced from 256 but with better architecture
+    num_heads=[3, 6, 12, 24],  # FIXED: Proper head scaling
+    window_size=7,    # FIXED: Standard window size
+    mlp_ratio=4.0,    # FIXED: Standard MLP ratio
+    decoder_embed_dim=256,  # FIXED: Larger decoder for better representation
     patch_size=4,
     drop_rate=0.1,
     attn_drop_rate=0.1,
     use_checkpoint=True,  # Enable checkpointing for memory efficiency
     
-    # 📈 IMPROVED TRAINING PARAMETERS
-    learning_rate=1e-3,  # Slightly increased for faster convergence
-    weight_decay=1e-4,
-    epochs=30,  # Reduced to 30 epochs
-    warmup_epochs=5,  # Reduced warmup for shorter training
+    # 📈 FIXED TRAINING PARAMETERS
+    learning_rate=5e-4,  # FIXED: More conservative learning rate
+    weight_decay=1e-5,   # FIXED: Reduced weight decay
+    epochs=30,  # Keep 30 epochs
+    warmup_epochs=5,  # FIXED: Reduced warmup
     device='cuda',
     use_amp=True,
     gradient_clip_val=1.0,
-    accumulate_grad_batches=2,  # Effective batch size = 12
+    accumulate_grad_batches=3,  # FIXED: Increased accumulation (effective batch = 12)
     
     # Enhanced validation settings
     val_interval=1,
-    save_interval=3,  # More frequent saves for shorter training
-    early_stopping_patience=10,  # Reduced patience for shorter training
+    save_interval=3,
+    early_stopping_patience=10,
     limit_val_batches=15,  # Faster validation
     
     # Inference parameters
     roi_size=[128, 128, 128],
     sw_batch_size=2,
     overlap=0.25,
-    
 )
 
 # Enhanced configuration validation
 def validate_improved_config(args):
     """Enhanced validation for improved configuration"""
-    print("\n🔍 Validating improved configuration...")
+    print("\n🔍 Validating fixed configuration...")
     
     # Basic validations
     assert args.embed_dim == args.feature_size, f"embed_dim ({args.embed_dim}) should match feature_size ({args.feature_size})"
@@ -138,55 +151,39 @@ def validate_improved_config(args):
         print(f"🔧 Available GPU memory: {gpu_memory:.1f} GB")
         
         # Rough memory estimation (very approximate)
-        estimated_memory = args.batch_size * 0.8  # GB per batch item
+        estimated_memory = args.batch_size * 1.2  # GB per batch item (larger model)
         if estimated_memory > gpu_memory * 0.8:
             print(f"⚠️  Warning: Estimated memory usage ({estimated_memory:.1f}GB) may exceed available memory")
             print(f"   Consider reducing batch_size from {args.batch_size} to {int(args.batch_size * 0.7)}")
     
-    print("✅ Enhanced configuration validation passed!")
+    print("✅ Fixed configuration validation passed!")
 
-def estimate_parameters(args):
-    """Rough estimation of model parameters"""
-    embed_dim = args.embed_dim
-    depths = args.depths
-    decoder_embed_dim = args.decoder_embed_dim
-    
-    # Rough encoder estimation
-    encoder_params = 0
-    for i, depth in enumerate(depths):
-        layer_dim = embed_dim * (2 ** i)
-        # Attention + MLP parameters per layer
-        layer_params = (layer_dim * layer_dim * 3 * 2) + (layer_dim * layer_dim * args.mlp_ratio * 2)
-        encoder_params += layer_params * depth
-    
-    # Rough decoder estimation  
-    decoder_params = decoder_embed_dim * decoder_embed_dim * 8  # Rough estimate
-    
-    # Patch embedding
-    patch_params = args.in_channels * embed_dim * (args.patch_size ** 3)
-    
-    total = encoder_params + decoder_params + patch_params
-    return total
 
 def print_training_strategy():
-    """Print the improved training strategy"""
+    """Print the fixed training strategy"""
     print("\n" + "="*60)
-    print("🎯 IMPROVED TRAINING STRATEGY")
+    print("🎯 FIXED TRAINING STRATEGY")
     print("="*60)
-    print("Phase 1 (Epochs 1-10): Warmup")
-    print("  • Gradual learning rate increase")
-    print("  • Focus on stable gradient flow")
-    print("  • Light regularization")
+    print("Key Changes:")
+    print("  • DiceCELoss with class weighting [1.0, 2.0, 4.0]")
+    print("  • Proper one-hot conversion for labels")
+    print("  • Background exclusion from metrics")
+    print("  • Standard SwinUNETR architecture")
+    print("  • Conservative learning rate schedule")
     print()
-    print("Phase 2 (Epochs 11-40): Main Training")
-    print("  • Full learning rate")
-    print("  • Combined Dice + CrossEntropy loss")
+    print("Phase 1: Warmup (5 epochs)")
+    print("  • Gradual learning rate increase")
+    print("  • Model stabilization")
+    print()
+    print("Phase 2: Main Training")
+    print("  • Full learning rate with cosine decay")
+    print("  • Class-weighted loss for rare tumor regions")
     print("  • Regular validation monitoring")
     print()
-    print("Phase 3 (Epochs 41-80): Fine-tuning")
-    print("  • Cosine annealing schedule")
-    print("  • Increased validation frequency")
-    print("  • Best model checkpointing")
+    print("Expected Improvements:")
+    print("  • TC Dice > 0.7 (was 0.005)")
+    print("  • WT Dice > 0.8 (was 0.57)")
+    print("  • ET Dice > 0.6 (was 0.34)")
     print("="*60)
 
 # Print training strategy
@@ -196,15 +193,15 @@ print_training_strategy()
 validate_improved_config(args)
 
 # Print final configuration summary
-print("\n=== 🚀 IMPROVED LIGHTWEIGHT SWINUNETR CONFIGURATION ===")
+print("\n=== 🚀 FIXED LIGHTWEIGHT SWINUNETR CONFIGURATION ===")
 print(f"🎯 Batch size: {args.batch_size} (effective: {args.batch_size * args.accumulate_grad_batches})")
 print(f"📐 Image size: {args.img_size}")
-print(f"🧠 Embed dim: {args.embed_dim} (+{(args.embed_dim/48-1)*100:.0f}% vs original)")
+print(f"🧠 Embed dim: {args.embed_dim} (FIXED: Standard SwinUNETR)")
 print(f"🏗️  Depths: {args.depths}")
-print(f"👁️  Num heads: {args.num_heads}")
-print(f"🪟 Window size: {args.window_size}")
-print(f"🔧 Decoder embed dim: {args.decoder_embed_dim}")
-print(f"⚡ Learning rate: {args.learning_rate}")
+print(f"👁️  Num heads: {args.num_heads} (FIXED: Proper scaling)")
+print(f"🪟 Window size: {args.window_size} (FIXED: Standard)")
+print(f"🔧 Decoder embed dim: {args.decoder_embed_dim} (FIXED: Larger)")
+print(f"⚡ Learning rate: {args.learning_rate} (FIXED: Conservative)")
 print(f"🔄 SW batch size: {args.sw_batch_size}")
 print(f"🕐 Warmup epochs: {args.warmup_epochs}")
 print(f"📊 Total epochs: {args.epochs}")
@@ -212,12 +209,12 @@ print(f"📊 Total epochs: {args.epochs}")
 def run_with_error_handling():
     """Run training with comprehensive error handling"""
     try:
-        print("\n🚀 Starting improved lightweight SwinUNETR training...")
+        print("\n🚀 Starting training with FIXED configuration...")
         print("Expected improvements:")
-        print("  • 5-15% higher dice scores")
-        print("  • More stable training curves")
-        print("  • Better parameter efficiency")
-        print("  • Improved memory usage")
+        print("  • Better TC segmentation (major issue fixed)")
+        print("  • Improved ET detection")
+        print("  • More stable training")
+        print("  • Faster convergence")
         
         main(args)
         
@@ -226,10 +223,9 @@ def run_with_error_handling():
             print(f"\n❌ CUDA Out of Memory Error!")
             print("🔧 Suggested fixes:")
             print(f"1. Reduce batch_size from {args.batch_size} to {args.batch_size//2}")
-            print("2. Reduce accumulate_grad_batches from 2 to 1")
+            print("2. Reduce accumulate_grad_batches from 3 to 2")
             print("3. Reduce sw_batch_size from 2 to 1")
-            print("4. Enable gradient checkpointing")
-            print("5. Reduce image size from 128 to 96")
+            print("4. Reduce decoder_embed_dim from 256 to 192")
         else:
             print(f"❌ Runtime error: {e}")
         raise e
@@ -237,20 +233,20 @@ def run_with_error_handling():
     except ImportError as e:
         print(f"❌ Import error: {e}")
         print("🔧 Suggested fixes:")
-        print("1. Make sure improved_architecture.py is in your swinunetrv2 package")
-        print("2. Update your main.py to support 'improved_lightweight_swinunetr' model_type")
+        print("1. Make sure the fixed architecture.py is in your swinunetrv2 package")
+        print("2. Update your main.py to support the fixed model")
         print("3. Check that all required dependencies are installed")
         raise e
         
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
         print("\n🔧 General troubleshooting:")
-        print("1. Check that your swinunetrv2 package supports the improved model")
+        print("1. Check that your swinunetrv2 package supports the fixed model")
         print("2. Verify all configuration parameters are valid")
         print("3. Make sure dataset is properly formatted")
         print("4. Check file permissions and disk space")
         raise e
 
-# Start improved training
+# Start fixed training
 if __name__ == "__main__":
     run_with_error_handling()

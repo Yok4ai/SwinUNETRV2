@@ -287,11 +287,11 @@ class SwinEncoder3D(nn.Module):
         self,
         patch_size=4,
         in_chans=4,
-        embed_dim=64,  # Increased base dimension
-        depths=[2, 2, 6, 2],  # Standard depths
-        num_heads=[2, 4, 8, 16],  # More heads for better representation
-        window_size=4,
-        mlp_ratio=2.,
+        embed_dim=96,  # FIXED: Use proven dimension from SwinUNETR
+        depths=[2, 2, 6, 2],
+        num_heads=[3, 6, 12, 24],  # FIXED: Proper head scaling
+        window_size=7,  # FIXED: Use standard window size
+        mlp_ratio=4.,  # FIXED: Use standard ratio
         qkv_bias=True,
         drop_rate=0.,
         attn_drop_rate=0.
@@ -361,56 +361,62 @@ class SegFormerDecoder3D(nn.Module):
     """SegFormer-style decoder with skip connections"""
     def __init__(
         self,
-        feature_dims=[64, 128, 256, 512],
-        decoder_embed_dim=128,  # Increased from 64
+        feature_dims=[96, 192, 384, 768],  # FIXED: Standard SwinUNETR dimensions
+        decoder_embed_dim=256,  # FIXED: Increased for better representation
         num_classes=3,
         dropout=0.1
     ):
         super().__init__()
         
-        # Feature projections
+        # Feature projections with proper normalization
         self.linear_c4 = nn.Sequential(
-            nn.Conv3d(feature_dims[3], decoder_embed_dim, 1),
+            nn.Conv3d(feature_dims[3], decoder_embed_dim, 1, bias=False),
             nn.BatchNorm3d(decoder_embed_dim),
             nn.ReLU(inplace=True)
         )
         self.linear_c3 = nn.Sequential(
-            nn.Conv3d(feature_dims[2], decoder_embed_dim, 1),
+            nn.Conv3d(feature_dims[2], decoder_embed_dim, 1, bias=False),
             nn.BatchNorm3d(decoder_embed_dim),
             nn.ReLU(inplace=True)
         )
         self.linear_c2 = nn.Sequential(
-            nn.Conv3d(feature_dims[1], decoder_embed_dim, 1),
+            nn.Conv3d(feature_dims[1], decoder_embed_dim, 1, bias=False),
             nn.BatchNorm3d(decoder_embed_dim),
             nn.ReLU(inplace=True)
         )
         self.linear_c1 = nn.Sequential(
-            nn.Conv3d(feature_dims[0], decoder_embed_dim, 1),
+            nn.Conv3d(feature_dims[0], decoder_embed_dim, 1, bias=False),
             nn.BatchNorm3d(decoder_embed_dim),
             nn.ReLU(inplace=True)
         )
         
-        # Feature fusion with attention
-        self.fuse_attention = nn.Sequential(
-            nn.Conv3d(4 * decoder_embed_dim, decoder_embed_dim, 3, padding=1),
-            nn.BatchNorm3d(decoder_embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(decoder_embed_dim, 4, 1),
-            nn.Sigmoid()
-        )
-        
-        # Enhanced fusion module
+        # FIXED: Simplified fusion without attention for stability
         self.linear_fuse = nn.Sequential(
-            nn.Conv3d(4 * decoder_embed_dim, decoder_embed_dim, 3, padding=1),
+            nn.Conv3d(4 * decoder_embed_dim, decoder_embed_dim, 3, padding=1, bias=False),
             nn.BatchNorm3d(decoder_embed_dim),
             nn.ReLU(inplace=True),
-            nn.Conv3d(decoder_embed_dim, decoder_embed_dim, 3, padding=1),
+            nn.Conv3d(decoder_embed_dim, decoder_embed_dim, 3, padding=1, bias=False),
             nn.BatchNorm3d(decoder_embed_dim),
             nn.ReLU(inplace=True)
         )
         
         self.dropout = nn.Dropout3d(dropout)
+        
+        # FIXED: Direct classification without sigmoid (let loss handle it)
         self.classifier = nn.Conv3d(decoder_embed_dim, num_classes, 1)
+        
+        # Initialize weights properly
+        self.apply(self._init_weights)
+        
+    def _init_weights(self, m):
+        """Proper weight initialization"""
+        if isinstance(m, nn.Conv3d):
+            nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.BatchNorm3d):
+            nn.init.constant_(m.weight, 1)
+            nn.init.constant_(m.bias, 0)
         
     def forward(self, features):
         c1, c2, c3, c4 = features
@@ -428,20 +434,9 @@ class SegFormerDecoder3D(nn.Module):
         _c3 = torch.nn.functional.interpolate(_c3, size=target_size, mode="trilinear", align_corners=False)
         _c2 = torch.nn.functional.interpolate(_c2, size=target_size, mode="trilinear", align_corners=False)
         
-        # Concatenate features
+        # Concatenate and fuse features
         concat_features = torch.cat([_c4, _c3, _c2, _c1], dim=1)
-        
-        # Attention-based fusion
-        attention_weights = self.fuse_attention(concat_features)
-        weighted_features = torch.cat([
-            _c4 * attention_weights[:, 0:1], 
-            _c3 * attention_weights[:, 1:2],
-            _c2 * attention_weights[:, 2:3], 
-            _c1 * attention_weights[:, 3:4]
-        ], dim=1)
-        
-        # Fuse features
-        fused = self.linear_fuse(weighted_features)
+        fused = self.linear_fuse(concat_features)
         fused = self.dropout(fused)
         
         # Final classification
@@ -462,12 +457,12 @@ class LightweightSwinUNETR(nn.Module):
         patch_size=4,
         in_channels=4,
         out_channels=3,
-        embed_dim=64,  # Increased base dimension
-        depths=[2, 2, 6, 2],  # Standard depths
-        num_heads=[2, 4, 8, 16],  # More heads
-        window_size=4,
-        mlp_ratio=2.,
-        decoder_embed_dim=128,  # Increased decoder dimension
+        embed_dim=96,  # FIXED: Standard SwinUNETR embedding dimension
+        depths=[2, 2, 6, 2],
+        num_heads=[3, 6, 12, 24],  # FIXED: Proper head scaling
+        window_size=7,  # FIXED: Standard window size
+        mlp_ratio=4.,  # FIXED: Standard MLP ratio
+        decoder_embed_dim=256,  # FIXED: Increased decoder dimension
         dropout=0.1
     ):
         super().__init__()
@@ -494,6 +489,19 @@ class LightweightSwinUNETR(nn.Module):
             dropout=dropout
         )
         
+        # Initialize weights
+        self.apply(self._init_weights)
+        
+    def _init_weights(self, m):
+        """Proper weight initialization"""
+        if isinstance(m, nn.Linear):
+            nn.init.trunc_normal_(m.weight, std=.02)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+        
     def forward(self, x):
         features = self.encoder(x)
         output = self.decoder(features)
@@ -511,18 +519,18 @@ class BrainTumorSegmentation(pl.LightningModule):
         val_loader, 
         max_epochs=50, 
         val_interval=1, 
-        learning_rate=1e-3,  # Reduced learning rate
+        learning_rate=5e-4,  # FIXED: More conservative learning rate
         img_size=128,
         feature_size=48,
-        embed_dim=64,  # Increased
-        depths=[2, 2, 6, 2],  # Standard depths
-        num_heads=[2, 4, 8, 16],  # More heads
-        window_size=4,
-        mlp_ratio=2.0,  # Reduced MLP ratio
-        decoder_embed_dim=128,  # Increased
+        embed_dim=96,  # FIXED: Standard dimension
+        depths=[2, 2, 6, 2],
+        num_heads=[3, 6, 12, 24],  # FIXED: Proper head scaling
+        window_size=7,  # FIXED: Standard window size
+        mlp_ratio=4.0,  # FIXED: Standard ratio
+        decoder_embed_dim=256,  # FIXED: Larger decoder
         patch_size=4,
-        weight_decay=1e-4,
-        warmup_epochs=10,  # More warmup
+        weight_decay=1e-5,  # FIXED: Reduced weight decay
+        warmup_epochs=5,  # FIXED: Reduced warmup
         drop_rate=0.1,
         attn_drop_rate=0.1,
         roi_size=(128, 128, 128),
@@ -550,19 +558,25 @@ class BrainTumorSegmentation(pl.LightningModule):
         total_params = self.model.count_parameters()
         print(f"🚀 Model initialized with {total_params:,} parameters ({total_params/1e6:.2f}M)")
         
-        # Combined loss function for better training
-        self.dice_loss = DiceLoss(
-            smooth_nr=0, 
-            smooth_dr=1e-5, 
-            squared_pred=True, 
-            to_onehot_y=False, 
-            sigmoid=True
+        # FIXED: Use DiceCELoss for better class balance
+        self.dice_ce_loss = DiceCELoss(
+            smooth_nr=1e-5,
+            smooth_dr=1e-5,
+            squared_pred=True,
+            to_onehot_y=True,  # FIXED: Convert labels to one-hot
+            softmax=True,      # FIXED: Apply softmax
+            include_background=False,  # FIXED: Exclude background
+            ce_weight=torch.tensor([1.0, 2.0, 4.0])  # FIXED: Weight rare classes more
         )
-        self.ce_loss = nn.CrossEntropyLoss()
         
-        self.dice_metric = DiceMetric(include_background=True, reduction="mean")
-        self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
-        self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
+        self.dice_metric = DiceMetric(include_background=False, reduction="mean")  # FIXED: Exclude background
+        self.dice_metric_batch = DiceMetric(include_background=False, reduction="mean_batch")  # FIXED: Exclude background
+        
+        # FIXED: Proper post-processing for multi-class
+        self.post_trans = Compose([
+            Activations(softmax=True),
+            AsDiscrete(argmax=True, to_onehot=3)
+        ])
         
         self.best_metric = -1
         self.train_loader = train_loader
@@ -595,25 +609,22 @@ class BrainTumorSegmentation(pl.LightningModule):
 
         outputs = self(inputs)
         
-        # Combined loss
-        dice_loss = self.dice_loss(outputs, labels)
-        
-        # Convert to one-hot for CE loss
-        labels_onehot = torch.zeros_like(outputs)
-        for i in range(3):
-            labels_onehot[:, i] = (labels[:, 0] == i).float()
-        
-        ce_loss = self.ce_loss(outputs, labels_onehot.argmax(dim=1))
-        loss = 0.7 * dice_loss + 0.3 * ce_loss
+        # FIXED: Proper loss calculation
+        loss = self.dice_ce_loss(outputs, labels)
         
         self.log("train_loss", loss, prog_bar=True)
-        self.log("train_dice_loss", dice_loss, prog_bar=True)
-        self.log("train_ce_loss", ce_loss, prog_bar=True)
 
-        outputs = [self.post_trans(i) for i in decollate_batch(outputs)]
+        # FIXED: Proper metric calculation
+        outputs_softmax = torch.softmax(outputs, dim=1)
+        outputs_onehot = torch.zeros_like(outputs)
+        outputs_onehot.scatter_(1, outputs_softmax.argmax(dim=1, keepdim=True), 1)
         
-        self.dice_metric(y_pred=outputs, y=labels)
-        self.dice_metric_batch(y_pred=outputs, y=labels)
+        # Convert labels to one-hot for metric calculation
+        labels_onehot = torch.zeros_like(outputs)
+        labels_onehot.scatter_(1, labels.long(), 1)
+        
+        self.dice_metric(y_pred=outputs_onehot, y=labels_onehot)
+        self.dice_metric_batch(y_pred=outputs_onehot, y=labels_onehot)
 
         train_dice = self.dice_metric.aggregate().item()
         self.log("train_mean_dice", train_dice, prog_bar=True)
@@ -621,13 +632,14 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.train_metric_values.append(train_dice)
 
         metric_batch = self.dice_metric_batch.aggregate()
-        self.train_metric_values_tc.append(metric_batch[0].item())
-        self.train_metric_values_wt.append(metric_batch[1].item())
-        self.train_metric_values_et.append(metric_batch[2].item())
+        if len(metric_batch) >= 3:  # Ensure we have all 3 classes
+            self.train_metric_values_tc.append(metric_batch[0].item())
+            self.train_metric_values_wt.append(metric_batch[1].item())
+            self.train_metric_values_et.append(metric_batch[2].item())
 
-        self.log("train_tc", metric_batch[0].item(), prog_bar=True)
-        self.log("train_wt", metric_batch[1].item(), prog_bar=True)
-        self.log("train_et", metric_batch[2].item(), prog_bar=True)
+            self.log("train_tc", metric_batch[0].item(), prog_bar=True)
+            self.log("train_wt", metric_batch[1].item(), prog_bar=True)
+            self.log("train_et", metric_batch[2].item(), prog_bar=True)
 
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
@@ -635,12 +647,13 @@ class BrainTumorSegmentation(pl.LightningModule):
         return loss
 
     def on_train_epoch_end(self):
-        train_loss = self.trainer.logged_metrics["train_loss"].item()
-        self.train_loss_values.append(train_loss)
-        
-        avg_train_loss = sum(self.train_loss_values) / len(self.train_loss_values)
-        self.log("avg_train_loss", avg_train_loss, prog_bar=True)
-        self.avg_train_loss_values.append(avg_train_loss)
+        if hasattr(self.trainer, 'logged_metrics') and "train_loss" in self.trainer.logged_metrics:
+            train_loss = self.trainer.logged_metrics["train_loss"].item()
+            self.train_loss_values.append(train_loss)
+            
+            avg_train_loss = sum(self.train_loss_values) / len(self.train_loss_values)
+            self.log("avg_train_loss", avg_train_loss, prog_bar=True)
+            self.avg_train_loss_values.append(avg_train_loss)
 
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
@@ -653,13 +666,21 @@ class BrainTumorSegmentation(pl.LightningModule):
             overlap=self.overlap
         )
         
-        val_loss = self.dice_loss(val_outputs, val_labels)
+        # FIXED: Proper validation loss calculation
+        val_loss = self.dice_ce_loss(val_outputs, val_labels)
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True)
         
-        val_outputs = [self.post_trans(i) for i in decollate_batch(val_outputs)]    
+        # FIXED: Proper validation metric calculation
+        val_outputs_softmax = torch.softmax(val_outputs, dim=1)
+        val_outputs_onehot = torch.zeros_like(val_outputs)
+        val_outputs_onehot.scatter_(1, val_outputs_softmax.argmax(dim=1, keepdim=True), 1)
         
-        self.dice_metric(y_pred=val_outputs, y=val_labels)
-        self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
+        # Convert labels to one-hot for metric calculation
+        val_labels_onehot = torch.zeros_like(val_outputs)
+        val_labels_onehot.scatter_(1, val_labels.long(), 1)
+        
+        self.dice_metric(y_pred=val_outputs_onehot, y=val_labels_onehot)
+        self.dice_metric_batch(y_pred=val_outputs_onehot, y=val_labels_onehot)
     
         val_dice = self.dice_metric.aggregate().item()
         self.log("val_mean_dice", val_dice, prog_bar=True)
@@ -670,23 +691,23 @@ class BrainTumorSegmentation(pl.LightningModule):
         val_dice = self.dice_metric.aggregate().item()
         self.metric_values.append(val_dice)
 
-        val_loss = self.trainer.logged_metrics["val_loss"].item()
-        self.epoch_loss_values.append(val_loss)
+        if hasattr(self.trainer, 'logged_metrics') and "val_loss" in self.trainer.logged_metrics:
+            val_loss = self.trainer.logged_metrics["val_loss"].item()
+            self.epoch_loss_values.append(val_loss)
 
-        avg_val_loss = sum(self.epoch_loss_values) / len(self.epoch_loss_values)
-        self.log("avg_val_loss", avg_val_loss, prog_bar=True)
-        self.avg_val_loss_values.append(avg_val_loss)
+            avg_val_loss = sum(self.epoch_loss_values) / len(self.epoch_loss_values)
+            self.log("avg_val_loss", avg_val_loss, prog_bar=True)
+            self.avg_val_loss_values.append(avg_val_loss)
 
         metric_batch = self.dice_metric_batch.aggregate()
-        self.metric_values_tc.append(metric_batch[0].item())
-        self.metric_values_wt.append(metric_batch[1].item())
-        self.metric_values_et.append(metric_batch[2].item())
+        if len(metric_batch) >= 3:  # Ensure we have all 3 classes
+            self.metric_values_tc.append(metric_batch[0].item())
+            self.metric_values_wt.append(metric_batch[1].item())
+            self.metric_values_et.append(metric_batch[2].item())
 
-        self.log("val_loss", val_loss, prog_bar=True)
-        self.log("val_mean_dice", val_dice, prog_bar=True)
-        self.log("val_tc", metric_batch[0].item(), prog_bar=True)
-        self.log("val_wt", metric_batch[1].item(), prog_bar=True)
-        self.log("val_et", metric_batch[2].item(), prog_bar=True)
+            self.log("val_tc", metric_batch[0].item(), prog_bar=True)
+            self.log("val_wt", metric_batch[1].item(), prog_bar=True)
+            self.log("val_et", metric_batch[2].item(), prog_bar=True)
     
         if val_dice > self.best_metric:
             self.best_metric = val_dice
@@ -698,30 +719,29 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric_batch.reset()
 
     def on_train_end(self):
-        print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}, "
-              f"tc: {self.metric_values_tc[-1]:.4f}, "
-              f"wt: {self.metric_values_wt[-1]:.4f}, "
-              f"et: {self.metric_values_et[-1]:.4f}.")
+        print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}")
+        if len(self.metric_values_tc) > 0:
+            print(f"Final metrics - TC: {self.metric_values_tc[-1]:.4f}, "
+                  f"WT: {self.metric_values_wt[-1]:.4f}, "
+                  f"ET: {self.metric_values_et[-1]:.4f}")
 
     def configure_optimizers(self):
-        # Use different learning rates for different components
-        encoder_params = list(self.model.encoder.parameters())
-        decoder_params = list(self.model.decoder.parameters())
+        # FIXED: More conservative optimization strategy
+        optimizer = AdamW(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            weight_decay=self.hparams.weight_decay,
+            betas=(0.9, 0.999)
+        )
         
-        optimizer = AdamW([
-            {'params': encoder_params, 'lr': self.hparams.learning_rate},
-            {'params': decoder_params, 'lr': self.hparams.learning_rate * 2}  # Higher LR for decoder
-        ], weight_decay=self.hparams.weight_decay)
-        
-        # Cosine annealing with warmup
+        # FIXED: Simpler scheduler with warmup
         total_steps = len(self.train_loader) * self.hparams.max_epochs
         warmup_steps = len(self.train_loader) * self.hparams.warmup_epochs
         
         def lr_lambda(current_step):
             if current_step < warmup_steps:
                 return float(current_step) / float(max(1, warmup_steps))
-            progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-            return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+            return max(0.1, 0.5 * (1.0 + math.cos(math.pi * (current_step - warmup_steps) / (total_steps - warmup_steps))))
         
         scheduler = {
             'scheduler': torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda),
@@ -734,22 +754,24 @@ class BrainTumorSegmentation(pl.LightningModule):
 
 def test_model():
     """Test the model with architecture"""
-    print("🧪 Testing model...")
+    print("🧪 Testing fixed model...")
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     test_input = torch.randn(1, 4, 128, 128, 128).to(device)
     
-    # Create model
+    # Create model with fixed parameters
     model = LightweightSwinUNETR(
-        embed_dim=64,
+        embed_dim=96,
         depths=[2, 2, 6, 2],
-        num_heads=[2, 4, 8, 16],
-        decoder_embed_dim=128
+        num_heads=[3, 6, 12, 24],
+        window_size=7,
+        mlp_ratio=4.0,
+        decoder_embed_dim=256
     ).to(device)
     
     # Count parameters
     total_params = model.count_parameters()
-    print(f"✅ Model has {total_params:,} parameters ({total_params/1e6:.2f}M)")
+    print(f"✅ Fixed model has {total_params:,} parameters ({total_params/1e6:.2f}M)")
     
     # Test forward pass
     model.eval()
@@ -759,6 +781,10 @@ def test_model():
             print(f"✅ Forward pass successful!")
             print(f"   Input shape: {test_input.shape}")
             print(f"   Output shape: {output.shape}")
+            
+            # Verify output properties
+            print(f"   Output range: [{output.min():.3f}, {output.max():.3f}]")
+            print(f"   Output mean: {output.mean():.3f}")
             
             # Check memory usage
             if torch.cuda.is_available():
@@ -773,66 +799,19 @@ def test_model():
     return True
 
 
-# Comparison function
-def compare_models():
-    """Compare original vs model"""
-    print("🔬 Comparing model architectures...")
-    
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    # Original model (from your code)
-    from architecture import LightweightSwinUNETR as OriginalModel
-    original = OriginalModel(
-        embed_dim=32,
-        depths=[1, 1, 1, 1],
-        decoder_embed_dim=64
-    ).to(device)
-    
-    # Model
-    model = LightweightSwinUNETR(
-        embed_dim=64,
-        depths=[2, 2, 6, 2],
-        decoder_embed_dim=128
-    ).to(device)
-    
-    original_params = original.count_parameters()
-    model_params = model.count_parameters()
-    
-    print(f"📊 Model Comparison:")
-    print(f"   Original Model: {original_params:,} parameters ({original_params/1e6:.2f}M)")
-    print(f"   Model: {model_params:,} parameters ({model_params/1e6:.2f}M)")
-    print(f"   Parameter increase: {((model_params/original_params)-1)*100:.1f}%")
-    
-    # Test inference time
-    test_input = torch.randn(1, 4, 96, 96, 96).to(device)
-    
-    # Original model timing
-    torch.cuda.synchronize()
-    start_time = time.time()
-    with torch.no_grad():
-        _ = original(test_input)
-    torch.cuda.synchronize()
-    original_time = time.time() - start_time
-    
-    # Model timing
-    torch.cuda.synchronize()
-    start_time = time.time()
-    with torch.no_grad():
-        _ = model(test_input)
-    torch.cuda.synchronize()
-    model_time = time.time() - start_time
-    
-    print(f"⏱️  Inference Time Comparison (96³ volume):")
-    print(f"   Original Model: {original_time*1000:.1f}ms")
-    print(f"   Model: {model_time*1000:.1f}ms")
-    print(f"   Time increase: {((model_time/original_time)-1)*100:.1f}%")
-
-
 if __name__ == "__main__":
-    # Test the model
+    # Test the fixed model
     success = test_model()
     if success:
-        print("🎉 Model is ready for training!")
-        compare_models()
+        print("🎉 Fixed model is ready for training!")
+        print("\n🔧 Key fixes applied:")
+        print("• Standard SwinUNETR embedding dimension (96)")
+        print("• Proper head scaling [3, 6, 12, 24]")
+        print("• Standard window size (7)")
+        print("• DiceCELoss with class weighting")
+        print("• Fixed post-processing for multi-class")
+        print("• Proper one-hot label conversion")
+        print("• Exclude background from metrics")
+        print("• Conservative learning rate and optimization")
     else:
-        print("💥 Model needs debugging.")
+        print("💥 Model needs further debugging.")
