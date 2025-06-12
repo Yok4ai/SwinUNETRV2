@@ -228,36 +228,34 @@ def load_hybrid_model(checkpoint_path, model_config):
     return model
 
 
-# Easy configuration helpers
-def get_light_hybrid_config():
-    """Lightweight hybrid config for limited resources"""
-    return {
-        "efficiency_level": "light",
-        "decoder_embedding_dim": 96,
-        "batch_size": 6,
-        "accumulate_grad_batches": 2,
-        "learning_rate": 8e-4,
-        "sw_batch_size": 3,
-    }
-
-def get_balanced_hybrid_config():
-    """Balanced hybrid config - recommended default"""
-    return {
-        "efficiency_level": "balanced", 
-        "decoder_embedding_dim": 128,
-        "batch_size": 4,
-        "accumulate_grad_batches": 3,
-        "learning_rate": 5e-4,
-        "sw_batch_size": 2,
-    }
-
-def get_performance_hybrid_config():
-    """Performance-focused hybrid config"""
-    return {
-        "efficiency_level": "performance",
-        "decoder_embedding_dim": 192,
-        "batch_size": 3,
-        "accumulate_grad_batches": 4,
-        "learning_rate": 3e-4,
-        "sw_batch_size": 2,
-    }
+def get_hybrid_config(preset="balanced"):
+    """Get hybrid model configuration based on preset"""
+    if preset == "light":
+        return {
+            "efficiency_level": "light",
+            "decoder_embedding_dim": 96,
+            "batch_size": 6,
+            "accumulate_grad_batches": 2,
+            "learning_rate": 8e-4,
+            "sw_batch_size": 3,
+        }
+    elif preset == "balanced":
+        return {
+            "efficiency_level": "balanced", 
+            "decoder_embedding_dim": 128,
+            "batch_size": 4,
+            "accumulate_grad_batches": 3,
+            "learning_rate": 5e-4,
+            "sw_batch_size": 2,
+        }
+    elif preset == "performance":
+        return {
+            "efficiency_level": "performance",
+            "decoder_embedding_dim": 192,
+            "batch_size": 3,
+            "accumulate_grad_batches": 4,
+            "learning_rate": 3e-4,
+            "sw_batch_size": 2,
+        }
+    else:
+        raise ValueError(f"Unknown preset: {preset}. Choose from: light, balanced, performance")
