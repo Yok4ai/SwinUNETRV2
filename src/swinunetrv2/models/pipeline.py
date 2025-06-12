@@ -114,18 +114,24 @@ class BrainTumorSegmentation(pl.LightningModule):
 
     def compute_loss_with_class_weights(self, outputs, labels):
         """Compute weighted loss considering class imbalance"""
-        # Base DiceCE loss
+        # FIXED: Ensure labels are in correct format for MONAI losses
+        # Convert multi-channel one-hot labels to single-channel class indices
+        if labels.shape[1] > 1:  # If labels are one-hot encoded
+            labels = torch.argmax(labels, dim=1, keepdim=True)
+        
+        # Ensure labels are the right type
+        labels = labels.long()
+        
+        # Base DiceCE loss with proper label format
         base_loss = self.dice_ce_loss(outputs, labels)
         
         # FIXED: Apply class weights to the loss
-        # Convert outputs to probabilities and labels to one-hot
+        # Convert outputs to probabilities
         probs = torch.softmax(outputs, dim=1)
         
-        if labels.shape[1] != 3:  # If not one-hot
-            labels_onehot = torch.zeros_like(outputs)
-            labels_onehot.scatter_(1, labels.long(), 1)
-        else:
-            labels_onehot = labels
+        # Convert labels to one-hot for class weight computation
+        labels_onehot = torch.zeros_like(outputs)
+        labels_onehot.scatter_(1, labels, 1)
             
         # Compute per-class weights based on presence in batch
         class_presence = labels_onehot.sum(dim=[0, 2, 3, 4])  # Sum over batch and spatial dims
@@ -135,7 +141,14 @@ class BrainTumorSegmentation(pl.LightningModule):
         for i, (presence, weight) in enumerate(zip(class_presence, self.class_weights)):
             if presence > 0:  # Only weight if class is present
                 class_mask = labels_onehot[:, i:i+1]  # Get mask for this class
-                class_loss = self.dice_loss(probs[:, i:i+1], class_mask)
+                # Use dice loss without to_onehot_y since we're providing one-hot already
+                class_dice_loss = DiceLoss(
+                    include_background=False,
+                    to_onehot_y=False,  # Already one-hot
+                    softmax=False,      # Already softmax
+                    reduction="mean"
+                )
+                class_loss = class_dice_loss(probs[:, i:i+1], class_mask[:, i:i+1])
                 weighted_loss += (weight - 1.0) * class_loss * 0.1  # Small additional weighting
         
         return weighted_loss
@@ -150,12 +163,18 @@ class BrainTumorSegmentation(pl.LightningModule):
         outputs_onehot = torch.zeros_like(outputs)
         outputs_onehot.scatter_(1, outputs_pred, 1)
         
-        # Ensure labels are in correct format
-        if labels.shape[1] != 3:  # If not one-hot
-            labels_onehot = torch.zeros_like(outputs)
-            labels_onehot.scatter_(1, labels.long(), 1)
+        # FIXED: Ensure labels are in correct format (single channel with class indices)
+        if labels.shape[1] > 1:  # If labels are one-hot encoded
+            labels_single = torch.argmax(labels, dim=1, keepdim=True)
         else:
-            labels_onehot = labels
+            labels_single = labels
+        
+        # Ensure labels are long type
+        labels_single = labels_single.long()
+        
+        # Convert labels to one-hot for metric computation
+        labels_onehot = torch.zeros_like(outputs)
+        labels_onehot.scatter_(1, labels_single, 1)
         
         # Compute overall mean dice
         self.dice_metric_mean(y_pred=outputs_onehot, y=labels_onehot)
