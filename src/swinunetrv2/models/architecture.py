@@ -88,14 +88,14 @@ class UltraEfficientSwinUNETR(nn.Module):
         # Create lightweight decoder components with correct feature dimensions
         # These dimensions match the actual encoder output channels from SwinUNETR
         feature_dims = [
-            self.feature_size * 8,   # From layer 4 (dec4)
-            self.feature_size * 4,   # From layer 3 (enc3)
-            self.feature_size * 2,   # From layer 2 (enc2)
-            self.feature_size,       # From layer 1 (enc1)
+            self.feature_size * 32,  # From layer 4 (dec4)
+            self.feature_size * 16,   # From layer 3 (enc3)
+            self.feature_size * 8,   # From layer 2 (enc2)
+            self.feature_size * 4,   # From layer 1 (enc1)
         ]
         
         # Print feature dimensions for debugging
-        print(f"Feature dimensions for projections: {feature_dims}")
+        print(f"\nExpected feature dimensions for projections: {feature_dims}")
         
         # MLP projections for each feature level (like SegFormer)
         self.feature_projections = nn.ModuleList([
@@ -151,6 +151,14 @@ class UltraEfficientSwinUNETR(nn.Module):
         enc2 = self.backbone.encoder3(hidden_states_out[1])
         enc3 = self.backbone.encoder4(hidden_states_out[2])
         dec4 = self.backbone.encoder10(hidden_states_out[4])
+        
+        # Print actual feature dimensions for debugging
+        print(f"\nActual feature dimensions:")
+        print(f"enc0: {enc0.shape}")
+        print(f"enc1: {enc1.shape}")
+        print(f"enc2: {enc2.shape}")
+        print(f"enc3: {enc3.shape}")
+        print(f"dec4: {dec4.shape}")
         
         # Apply lightweight decoder
         if self.use_lightweight_decoder:
