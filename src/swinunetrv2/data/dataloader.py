@@ -35,11 +35,12 @@ def get_dataloaders(data_dir, batch_size, train_transforms, val_transforms):
     train_files = datalist[:train_size]
     val_files = datalist[train_size:]
     
+    
     ### Reduce training files to 30% for faster testing ###
-    reduced_train_size = int(len(train_files) * 0.3)
-    reduced_val_size = int(len(val_files) * 0.3)
+    reduced_train_size = int(len(train_files) * 0.2)
     train_files = train_files[:reduced_train_size]
-    val_files = val_files[:reduced_val_size]
+
+    
 
     # Create datasets
     train_ds = Dataset(data=train_files, transform=train_transforms)

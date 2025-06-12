@@ -2,7 +2,7 @@
 import torch
 import pytorch_lightning as pl
 import math
-from monai.losses import DiceCELoss
+from monai.losses import DiceCELoss, DiceLoss
 from monai.metrics import DiceMetric
 from monai.transforms import Compose, Activations, AsDiscrete
 from monai.inferers import sliding_window_inference
@@ -16,18 +16,18 @@ class BrainTumorSegmentation(pl.LightningModule):
         val_loader, 
         max_epochs=50, 
         val_interval=1, 
-        learning_rate=5e-4,  # FIXED: More conservative learning rate
+        learning_rate=5e-4,
         img_size=128,
         feature_size=48,
-        embed_dim=96,  # FIXED: Standard dimension
+        embed_dim=96,
         depths=[2, 2, 6, 2],
-        num_heads=[3, 6, 12, 24],  # FIXED: Proper head scaling
-        window_size=7,  # FIXED: Standard window size
-        mlp_ratio=4.0,  # FIXED: Standard ratio
-        decoder_embed_dim=256,  # FIXED: Larger decoder
+        num_heads=[3, 6, 12, 24],
+        window_size=7,
+        mlp_ratio=4.0,
+        decoder_embed_dim=256,
         patch_size=4,
-        weight_decay=1e-5,  # FIXED: Reduced weight decay
-        warmup_epochs=5,  # FIXED: Reduced warmup
+        weight_decay=1e-5,
+        warmup_epochs=5,
         drop_rate=0.1,
         attn_drop_rate=0.1,
         roi_size=(128, 128, 128),
@@ -55,29 +55,44 @@ class BrainTumorSegmentation(pl.LightningModule):
         total_params = self.model.count_parameters()
         print(f"🚀 Model initialized with {total_params:,} parameters ({total_params/1e6:.2f}M)")
         
-        # FIXED: Handle class weights separately
-        self.class_weights = torch.tensor([1.0, 2.0, 4.0]).to(self.device)
+        # FIXED: Use class weights for DiceCE loss - properly handle device placement
+        self.register_buffer('class_weights', torch.tensor([1.0, 2.0, 4.0]))
         
-        # FIXED: Use DiceCELoss for better class balance
-        self.dice_ce_loss = DiceCELoss(
-            include_background=False,  # FIXED: Exclude background
-            to_onehot_y=True,  # FIXED: Convert labels to one-hot
-            softmax=True,      # FIXED: Apply softmax
-            weight=self.class_weights,  # FIXED: Use class weights for both losses
-            lambda_dice=1.0,   # FIXED: Weight for dice component
-            lambda_ce=1.0,     # FIXED: Weight for CE component
-            smooth_nr=1e-5,    # FIXED: Small constant for numerator
-            smooth_dr=1e-5     # FIXED: Small constant for denominator
+        # FIXED: Separate Dice and CE losses for better control and per-class weighting
+        self.dice_loss = DiceLoss(
+            include_background=False,
+            to_onehot_y=True,
+            softmax=True,
+            squared_pred=False,
+            reduction="mean",
+            smooth_nr=1e-5,
+            smooth_dr=1e-5,
+            batch=False
         )
         
-        self.dice_metric = DiceMetric(include_background=False, reduction="mean")  # FIXED: Exclude background
-        self.dice_metric_batch = DiceMetric(include_background=False, reduction="mean_batch")  # FIXED: Exclude background
+        # FIXED: Use DiceCELoss with proper configuration for multi-class segmentation
+        self.dice_ce_loss = DiceCELoss(
+            include_background=False,
+            to_onehot_y=True,
+            softmax=True,
+            squared_pred=False,
+            reduction="mean",
+            smooth_nr=1e-5,
+            smooth_dr=1e-5,
+            batch=False,
+            weight=None,  # Will apply class weights manually
+            lambda_dice=1.0,
+            lambda_ce=1.0
+        )
         
-        # FIXED: Proper post-processing for multi-class
-        self.post_trans = Compose([
-            Activations(softmax=True),
-            AsDiscrete(argmax=True, to_onehot=3)
-        ])
+        # FIXED: Per-class dice metrics for detailed monitoring
+        self.dice_metric_mean = DiceMetric(include_background=False, reduction="mean")
+        self.dice_metric_batch = DiceMetric(include_background=False, reduction="mean_batch")
+        
+        # FIXED: Individual class metrics for better tracking
+        self.dice_metric_tc = DiceMetric(include_background=False, reduction="mean_batch")
+        self.dice_metric_wt = DiceMetric(include_background=False, reduction="mean_batch") 
+        self.dice_metric_et = DiceMetric(include_background=False, reduction="mean_batch")
         
         self.best_metric = -1
         self.train_loader = train_loader
@@ -86,83 +101,116 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.sw_batch_size = sw_batch_size
         self.overlap = overlap
 
-        # Training metrics
-        self.avg_train_loss_values = []
-        self.train_loss_values = []
-        self.train_metric_values = []
-        self.train_metric_values_tc = []
-        self.train_metric_values_wt = []
-        self.train_metric_values_et = []
-
-        # Validation metrics
-        self.avg_val_loss_values = []
-        self.epoch_loss_values = []
-        self.metric_values = []
-        self.metric_values_tc = []
-        self.metric_values_wt = []
-        self.metric_values_et = []
+        # Training metrics storage
+        self.train_metrics = {
+            'loss': [], 'dice_mean': [], 'dice_tc': [], 'dice_wt': [], 'dice_et': []
+        }
+        self.val_metrics = {
+            'loss': [], 'dice_mean': [], 'dice_tc': [], 'dice_wt': [], 'dice_et': []
+        }
 
     def forward(self, x):
         return self.model(x)
 
+    def compute_loss_with_class_weights(self, outputs, labels):
+        """Compute weighted loss considering class imbalance"""
+        # Base DiceCE loss
+        base_loss = self.dice_ce_loss(outputs, labels)
+        
+        # FIXED: Apply class weights to the loss
+        # Convert outputs to probabilities and labels to one-hot
+        probs = torch.softmax(outputs, dim=1)
+        
+        if labels.shape[1] != 3:  # If not one-hot
+            labels_onehot = torch.zeros_like(outputs)
+            labels_onehot.scatter_(1, labels.long(), 1)
+        else:
+            labels_onehot = labels
+            
+        # Compute per-class weights based on presence in batch
+        class_presence = labels_onehot.sum(dim=[0, 2, 3, 4])  # Sum over batch and spatial dims
+        
+        # Apply class weights where classes are present
+        weighted_loss = base_loss
+        for i, (presence, weight) in enumerate(zip(class_presence, self.class_weights)):
+            if presence > 0:  # Only weight if class is present
+                class_mask = labels_onehot[:, i:i+1]  # Get mask for this class
+                class_loss = self.dice_loss(probs[:, i:i+1], class_mask)
+                weighted_loss += (weight - 1.0) * class_loss * 0.1  # Small additional weighting
+        
+        return weighted_loss
+
+    def compute_metrics(self, outputs, labels, prefix=""):
+        """Compute all dice metrics and log them"""
+        # Convert outputs to probabilities and then to predictions
+        outputs_softmax = torch.softmax(outputs, dim=1)
+        outputs_pred = torch.argmax(outputs_softmax, dim=1, keepdim=True)
+        
+        # Convert predictions to one-hot
+        outputs_onehot = torch.zeros_like(outputs)
+        outputs_onehot.scatter_(1, outputs_pred, 1)
+        
+        # Ensure labels are in correct format
+        if labels.shape[1] != 3:  # If not one-hot
+            labels_onehot = torch.zeros_like(outputs)
+            labels_onehot.scatter_(1, labels.long(), 1)
+        else:
+            labels_onehot = labels
+        
+        # Compute overall mean dice
+        self.dice_metric_mean(y_pred=outputs_onehot, y=labels_onehot)
+        mean_dice = self.dice_metric_mean.aggregate().item()
+        
+        # Compute per-class dice
+        self.dice_metric_batch(y_pred=outputs_onehot, y=labels_onehot)
+        batch_dice = self.dice_metric_batch.aggregate()
+        
+        # Extract individual class scores (TC, WT, ET)
+        dice_scores = {
+            'mean': mean_dice,
+            'tc': batch_dice[0].item() if len(batch_dice) > 0 else 0.0,
+            'wt': batch_dice[1].item() if len(batch_dice) > 1 else 0.0,
+            'et': batch_dice[2].item() if len(batch_dice) > 2 else 0.0
+        }
+        
+        # FIXED: Log ALL metrics to progress bar
+        self.log(f"{prefix}dice_mean", dice_scores['mean'], prog_bar=True, sync_dist=True)
+        self.log(f"{prefix}dice_tc", dice_scores['tc'], prog_bar=True, sync_dist=True)
+        self.log(f"{prefix}dice_wt", dice_scores['wt'], prog_bar=True, sync_dist=True)
+        self.log(f"{prefix}dice_et", dice_scores['et'], prog_bar=True, sync_dist=True)
+        
+        # Reset metrics
+        self.dice_metric_mean.reset()
+        self.dice_metric_batch.reset()
+        
+        return dice_scores
+
     def training_step(self, batch, batch_idx):
         inputs, labels = batch["image"], batch["label"]
-
         outputs = self(inputs)
         
-        # FIXED: Ensure labels have correct shape for DiceCELoss
-        if labels.shape[1] != 1:
-            labels = labels.argmax(dim=1, keepdim=True)
+        # FIXED: Compute weighted loss
+        loss = self.compute_loss_with_class_weights(outputs, labels)
         
-        # FIXED: Proper loss calculation with class weights
-        loss = self.dice_ce_loss(outputs, labels)
+        # Log training loss
+        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
         
-        self.log("train_loss", loss, prog_bar=True)
-
-        # FIXED: Proper metric calculation
-        outputs_softmax = torch.softmax(outputs, dim=1)
+        # FIXED: Compute and log all training metrics
+        dice_scores = self.compute_metrics(outputs, labels, prefix="train_")
         
-        # Convert labels to one-hot for metric calculation
-        labels_onehot = torch.zeros_like(outputs)
-        labels_onehot.scatter_(1, labels.long(), 1)
-        
-        # Use softmax outputs directly for metric calculation
-        self.dice_metric(y_pred=outputs_softmax, y=labels_onehot)
-        self.dice_metric_batch(y_pred=outputs_softmax, y=labels_onehot)
-
-        train_dice = self.dice_metric.aggregate().item()
-        self.log("train_mean_dice", train_dice, prog_bar=True)
-
-        self.train_metric_values.append(train_dice)
-
-        metric_batch = self.dice_metric_batch.aggregate()
-        if len(metric_batch) >= 3:  # Ensure we have all 3 classes
-            self.train_metric_values_tc.append(metric_batch[0].item())
-            self.train_metric_values_wt.append(metric_batch[1].item())
-            self.train_metric_values_et.append(metric_batch[2].item())
-
-            # Log all dice scores in progress bar
-            self.log("train_tc", metric_batch[0].item(), prog_bar=True)
-            self.log("train_wt", metric_batch[1].item(), prog_bar=True)
-            self.log("train_et", metric_batch[2].item(), prog_bar=True)
-
-        self.dice_metric.reset()
-        self.dice_metric_batch.reset()
+        # Store metrics for epoch-level tracking
+        self.train_metrics['loss'].append(loss.item())
+        self.train_metrics['dice_mean'].append(dice_scores['mean'])
+        self.train_metrics['dice_tc'].append(dice_scores['tc'])
+        self.train_metrics['dice_wt'].append(dice_scores['wt'])
+        self.train_metrics['dice_et'].append(dice_scores['et'])
 
         return loss
-
-    def on_train_epoch_end(self):
-        if hasattr(self.trainer, 'logged_metrics') and "train_loss" in self.trainer.logged_metrics:
-            train_loss = self.trainer.logged_metrics["train_loss"].item()
-            self.train_loss_values.append(train_loss)
-            
-            avg_train_loss = sum(self.train_loss_values) / len(self.train_loss_values)
-            self.log("avg_train_loss", avg_train_loss, prog_bar=True)
-            self.avg_train_loss_values.append(avg_train_loss)
 
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
         
+        # Use sliding window inference for validation
         val_outputs = sliding_window_inference(
             val_inputs, 
             roi_size=self.roi_size, 
@@ -171,99 +219,115 @@ class BrainTumorSegmentation(pl.LightningModule):
             overlap=self.overlap
         )
         
-        # FIXED: Ensure labels have correct shape for DiceCELoss
-        if val_labels.shape[1] != 1:
-            val_labels = val_labels.argmax(dim=1, keepdim=True)
+        # FIXED: Compute weighted validation loss
+        val_loss = self.compute_loss_with_class_weights(val_outputs, val_labels)
         
-        # FIXED: Proper validation loss calculation with class weights
-        val_loss = self.dice_ce_loss(val_outputs, val_labels)
-        
+        # Log validation loss
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True)
         
-        # FIXED: Proper validation metric calculation
-        val_outputs_softmax = torch.softmax(val_outputs, dim=1)
-        val_outputs_onehot = torch.zeros_like(val_outputs)
-        val_outputs_onehot.scatter_(1, val_outputs_softmax.argmax(dim=1, keepdim=True), 1)
+        # FIXED: Compute and log all validation metrics
+        dice_scores = self.compute_metrics(val_outputs, val_labels, prefix="val_")
         
-        # Convert labels to one-hot for metric calculation
-        val_labels_onehot = torch.zeros_like(val_outputs)
-        val_labels_onehot.scatter_(1, val_labels.long(), 1)
-        
-        self.dice_metric(y_pred=val_outputs_onehot, y=val_labels_onehot)
-        self.dice_metric_batch(y_pred=val_outputs_onehot, y=val_labels_onehot)
-    
-        val_dice = self.dice_metric.aggregate().item()
-        self.log("val_mean_dice", val_dice, prog_bar=True)
-
-        # Log all validation dice scores in progress bar
-        metric_batch = self.dice_metric_batch.aggregate()
-        if len(metric_batch) >= 3:  # Ensure we have all 3 classes
-            self.log("val_tc", metric_batch[0].item(), prog_bar=True)
-            self.log("val_wt", metric_batch[1].item(), prog_bar=True)
-            self.log("val_et", metric_batch[2].item(), prog_bar=True)
-    
-        return {"val_loss": val_loss}
+        return {
+            "val_loss": val_loss, 
+            "val_dice_mean": dice_scores['mean'],
+            "val_dice_tc": dice_scores['tc'],
+            "val_dice_wt": dice_scores['wt'],
+            "val_dice_et": dice_scores['et']
+        }
 
     def on_validation_epoch_end(self):
-        val_dice = self.dice_metric.aggregate().item()
-        self.metric_values.append(val_dice)
-
-        if hasattr(self.trainer, 'logged_metrics') and "val_loss" in self.trainer.logged_metrics:
-            val_loss = self.trainer.logged_metrics["val_loss"].item()
-            self.epoch_loss_values.append(val_loss)
-
-            avg_val_loss = sum(self.epoch_loss_values) / len(self.epoch_loss_values)
-            self.log("avg_val_loss", avg_val_loss, prog_bar=True)
-            self.avg_val_loss_values.append(avg_val_loss)
-
-        metric_batch = self.dice_metric_batch.aggregate()
-        if len(metric_batch) >= 3:  # Ensure we have all 3 classes
-            self.metric_values_tc.append(metric_batch[0].item())
-            self.metric_values_wt.append(metric_batch[1].item())
-            self.metric_values_et.append(metric_batch[2].item())
-
-            self.log("val_tc", metric_batch[0].item(), prog_bar=True)
-            self.log("val_wt", metric_batch[1].item(), prog_bar=True)
-            self.log("val_et", metric_batch[2].item(), prog_bar=True)
-    
-        if val_dice > self.best_metric:
-            self.best_metric = val_dice
+        # Get current validation metrics from logged values
+        current_metrics = {
+            'mean': self.trainer.logged_metrics.get("val_dice_mean", 0.0).item(),
+            'tc': self.trainer.logged_metrics.get("val_dice_tc", 0.0).item(),
+            'wt': self.trainer.logged_metrics.get("val_dice_wt", 0.0).item(),
+            'et': self.trainer.logged_metrics.get("val_dice_et", 0.0).item()
+        }
+        
+        # Store in validation metrics
+        self.val_metrics['dice_mean'].append(current_metrics['mean'])
+        self.val_metrics['dice_tc'].append(current_metrics['tc'])
+        self.val_metrics['dice_wt'].append(current_metrics['wt'])
+        self.val_metrics['dice_et'].append(current_metrics['et'])
+        
+        if "val_loss" in self.trainer.logged_metrics:
+            self.val_metrics['loss'].append(self.trainer.logged_metrics["val_loss"].item())
+        
+        # FIXED: Check for best metric based on mean dice
+        current_dice = current_metrics['mean']
+        if current_dice > self.best_metric:
+            self.best_metric = current_dice
             self.best_metric_epoch = self.current_epoch
+            
+            # Save best model
             torch.save(self.model.state_dict(), "best_metric_model_swinunetr.pth")
-            self.log("best_metric", self.best_metric)
-    
-        self.dice_metric.reset()
-        self.dice_metric_batch.reset()
+            
+            # Log best metrics
+            self.log("best_metric", self.best_metric, prog_bar=False)
+            self.log("best_metric_epoch", self.best_metric_epoch, prog_bar=False)
+            
+            print(f"\n🎯 New best model at epoch {self.best_metric_epoch}!")
+            print(f"   Mean Dice: {self.best_metric:.4f}")
+            print(f"   TC: {current_metrics['tc']:.4f}, WT: {current_metrics['wt']:.4f}, ET: {current_metrics['et']:.4f}")
+
+    def on_train_epoch_end(self):
+        # FIXED: Compute and log epoch averages for better tracking
+        if self.train_metrics['loss']:
+            avg_train_loss = sum(self.train_metrics['loss']) / len(self.train_metrics['loss'])
+            avg_train_dice = sum(self.train_metrics['dice_mean']) / len(self.train_metrics['dice_mean'])
+            
+            self.log("epoch_train_loss", avg_train_loss, prog_bar=False)
+            self.log("epoch_train_dice", avg_train_dice, prog_bar=False)
+            
+            # Clear epoch metrics
+            for key in self.train_metrics:
+                self.train_metrics[key].clear()
 
     def on_train_end(self):
-        print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}")
-        if len(self.metric_values_tc) > 0:
-            print(f"Final metrics - TC: {self.metric_values_tc[-1]:.4f}, "
-                  f"WT: {self.metric_values_wt[-1]:.4f}, "
-                  f"ET: {self.metric_values_et[-1]:.4f}")
+        """Print final training summary"""
+        print(f"\n🎉 Training completed!")
+        print(f"   Best Mean Dice: {self.best_metric:.4f} at epoch {self.best_metric_epoch}")
+        
+        if self.val_metrics['dice_tc']:
+            final_metrics = {
+                'tc': self.val_metrics['dice_tc'][-1],
+                'wt': self.val_metrics['dice_wt'][-1], 
+                'et': self.val_metrics['dice_et'][-1]
+            }
+            print(f"   Final per-class Dice scores:")
+            print(f"     - Tumor Core (TC): {final_metrics['tc']:.4f}")
+            print(f"     - Whole Tumor (WT): {final_metrics['wt']:.4f}")
+            print(f"     - Enhancing Tumor (ET): {final_metrics['et']:.4f}")
 
     def configure_optimizers(self):
-        # FIXED: More conservative optimization strategy
+        """Configure optimizer with improved learning rate scheduling"""
         optimizer = AdamW(
             self.parameters(),
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay,
-            betas=(0.9, 0.999)
+            betas=(0.9, 0.999),
+            eps=1e-8
         )
         
-        # FIXED: Simpler scheduler with warmup
+        # FIXED: Better learning rate scheduling with warmup and cosine annealing
         total_steps = len(self.train_loader) * self.hparams.max_epochs
         warmup_steps = len(self.train_loader) * self.hparams.warmup_epochs
         
         def lr_lambda(current_step):
             if current_step < warmup_steps:
+                # Linear warmup
                 return float(current_step) / float(max(1, warmup_steps))
-            return max(0.1, 0.5 * (1.0 + math.cos(math.pi * (current_step - warmup_steps) / (total_steps - warmup_steps))))
+            else:
+                # Cosine annealing after warmup
+                progress = (current_step - warmup_steps) / (total_steps - warmup_steps)
+                return max(0.01, 0.5 * (1.0 + math.cos(math.pi * progress)))
         
         scheduler = {
             'scheduler': torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda),
             'interval': 'step',
-            'frequency': 1
+            'frequency': 1,
+            'name': 'learning_rate'
         }
         
         return [optimizer], [scheduler]
