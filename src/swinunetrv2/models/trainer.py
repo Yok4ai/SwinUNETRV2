@@ -7,10 +7,24 @@ from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 import wandb
 from .pipeline import BrainTumorSegmentation
-from .architecture import BrainTumorModel
 
 def setup_training(train_ds, val_ds, args):
-    # Data loaders
+    """
+    Setup training with direct parameter passing from args
+    
+    Args:
+        train_ds: Training dataset
+        val_ds: Validation dataset
+        args: Argument namespace containing all configuration parameters
+    
+    Returns:
+        model: BrainTumorSegmentation model
+        trainer: PyTorch Lightning trainer
+        train_loader: Training data loader
+        val_loader: Validation data loader
+    """
+    
+    # Data loaders using parameters from args
     train_loader = DataLoader(
         train_ds, 
         batch_size=args.batch_size, 
@@ -28,7 +42,7 @@ def setup_training(train_ds, val_ds, args):
         persistent_workers=args.persistent_workers
     )
 
-    # Early stopping callback
+    # Early stopping callback using parameters from args
     early_stop_callback = EarlyStopping(
         monitor="val_mean_dice",
         min_delta=0.001,
@@ -47,34 +61,24 @@ def setup_training(train_ds, val_ds, args):
         save_last=True
     )
 
-    # Initialize wandb
+    # Initialize wandb logger
     wandb_logger = WandbLogger(
         project="brain-tumor-segmentation",
         name="swinunetr-v2-brats23",
         log_model=True
     )
 
-    # Initialize model
+    # Initialize model with args - much cleaner parameter passing
     model = BrainTumorSegmentation(
-        train_loader=train_loader,
-        val_loader=val_loader,
-        max_epochs=args.epochs,
-        learning_rate=args.learning_rate,
-        feature_size=args.feature_size,
-        depths=args.depths,
-        num_heads=args.num_heads,
-        weight_decay=args.weight_decay,
-        warmup_epochs=args.warmup_epochs,
-        drop_rate=args.drop_rate,
-        attn_drop_rate=args.attn_drop_rate,
-        roi_size=args.roi_size,
-        sw_batch_size=args.sw_batch_size,
-        overlap=args.overlap
+        args=args,
+        train_loader=train_loader,  # Optional, for backward compatibility
+        val_loader=val_loader       # Optional, for backward compatibility
     )
 
-    # Setup trainer with improved configuration
+    # Setup trainer with parameters from args
     trainer = pl.Trainer(
         max_epochs=args.epochs,
+        strategy="auto",  # Let PyTorch Lightning choose
         devices=1,
         accelerator="gpu",
         precision='16-mixed' if args.use_amp else '32',
@@ -86,17 +90,27 @@ def setup_training(train_ds, val_ds, args):
         logger=wandb_logger,
         accumulate_grad_batches=args.accumulate_grad_batches,
         enable_progress_bar=True,
-        enable_model_summary=True,
-        detect_anomaly=True,
     )
 
     return model, trainer, train_loader, val_loader
 
 def train_model(model, trainer, train_loader, val_loader):
+    """
+    Train the model using the provided trainer and data loaders
+    
+    Args:
+        model: BrainTumorSegmentation model
+        trainer: PyTorch Lightning trainer
+        train_loader: Training data loader
+        val_loader: Validation data loader
+    
+    Returns:
+        best_metric: Best validation metric achieved during training
+    """
     try:
         trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
         print(f"Train completed, best_metric: {model.best_metric:.4f} at epoch: {model.best_metric_epoch}.")
         return model.best_metric
     except Exception as e:
         print(f"Training failed with error: {str(e)}")
-        raise e 
+        raise e

@@ -1,3 +1,4 @@
+#pipeline.py
 import os
 import time
 import torch
@@ -16,63 +17,52 @@ from torch.cuda.amp import GradScaler
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 
-from .architecture import SwinUNETR
+from .architecture import BrainTumorModel, create_swinunetr_model
 
 
 class BrainTumorSegmentation(pl.LightningModule):
-    def __init__(self, 
-        train_loader,
-        val_loader,
-        max_epochs=30,
-        val_interval=1, 
-        learning_rate=1e-4,
-        feature_size=24,
-        depths=(2, 2, 2, 2),
-        num_heads=(3, 6, 12, 24),
-        weight_decay=1e-5,
-        warmup_epochs=5,
-        drop_rate=0.0,
-        attn_drop_rate=0.0,
-        roi_size=(96, 96, 96),
-        sw_batch_size=1,
-        overlap=0.5
-        ):
+    def __init__(self, args, train_loader=None, val_loader=None):
+        """
+        Initialize with args object containing all parameters
         
+        Args:
+            args: Argument namespace containing all configuration parameters
+            train_loader: Training data loader (optional, for compatibility)
+            val_loader: Validation data loader (optional, for compatibility)
+        """
         super().__init__()
-        self.save_hyperparameters()
         
-        # Initialize model
-        self.model = SwinUNETR(
-            in_channels=4,
-            out_channels=3,
-            feature_size=feature_size,
-            use_checkpoint=True,
-            use_v2=True,  # Enable SwinUNETR-V2!
-            spatial_dims=3,
-            depths=depths,
-            num_heads=num_heads,
-            norm_name="instance",
-            drop_rate=drop_rate,
-            attn_drop_rate=attn_drop_rate,
-            dropout_path_rate=0.0,
-            downsample="mergingv2"  # Use improved merging for V2
+        # Store args for access to all parameters
+        self.args = args
+        self.save_hyperparameters(ignore=['train_loader', 'val_loader'])
+        
+        # Initialize model using the architecture module
+        # Option 1: Use the wrapper class
+        self.model = BrainTumorModel(args)
+        
+        # Option 2: Use the factory function (alternative)
+        # self.model = create_swinunetr_model(args)
+        
+        self.loss_function = DiceLoss(
+            smooth_nr=0, 
+            smooth_dr=1e-5, 
+            squared_pred=True, 
+            to_onehot_y=False, 
+            sigmoid=True
         )
-        self.loss_function = DiceLoss(smooth_nr=0, smooth_dr=1e-5, squared_pred=True, to_onehot_y=False, sigmoid=True)
                 
-        #Standard Dice Loss Metrics
+        # Standard Dice Loss Metrics
         self.dice_metric = DiceMetric(include_background=True, reduction="mean")
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
 
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
-
-        # self.scaler = torch.cuda.amp.GradScaler()
         
         self.best_metric = -1
+        self.best_metric_epoch = 0
+        
+        # Store data loaders if provided (for backward compatibility)
         self.train_loader = train_loader
         self.val_loader = val_loader
-
-        # # Validation Interval
-        # self.full_val_interval = 15
 
         # Training metrics
         self.avg_train_loss_values = []
@@ -105,7 +95,6 @@ class BrainTumorSegmentation(pl.LightningModule):
 
         # Apply sigmoid and threshold (same as validation)
         outputs = [self.post_trans(i) for i in decollate_batch(outputs)]
-        # outputs_tensor = torch.stack(outputs)  # Convert back to a tensor
         
         # Compute Dice
         self.dice_metric(y_pred=outputs, y=labels)
@@ -129,7 +118,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.log("train_wt", metric_batch[1].item(), prog_bar=True)
         self.log("train_et", metric_batch[2].item(), prog_bar=True)
 
-        # Reset metrics for the next epoch
+        # Reset metrics for the next step
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
 
@@ -146,8 +135,14 @@ class BrainTumorSegmentation(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
+        
+        # Use parameters from args for sliding window inference
         val_outputs = sliding_window_inference(
-            val_inputs, roi_size=(96, 96, 96), sw_batch_size=1, predictor=self.model, overlap=0.5
+            val_inputs, 
+            roi_size=self.args.roi_size, 
+            sw_batch_size=self.args.sw_batch_size, 
+            predictor=self.model, 
+            overlap=self.args.overlap
         )
         
         # Compute loss
@@ -164,14 +159,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         val_dice = self.dice_metric.aggregate().item()
         self.log("val_mean_dice", val_dice, prog_bar=True)
     
-        return {"val_loss": val_loss}  # Return val_loss to be used in aggregation
-
-    # def val_batch_switcher(self):
-    #     # Switch between small and full validation batch dynamically
-    #     if self.current_epoch % self.full_val_interval == 0:
-    #         self.trainer.limit_val_batch = 1.0
-    #     else:
-    #         self.trainer.limit_val_batch = 0.3
+        return {"val_loss": val_loss}
 
     def on_validation_epoch_end(self):
         # Store Dice Mean
@@ -179,7 +167,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.metric_values.append(val_dice)
 
         # Store Validation Loss 
-        # val_loss = self.trainer.logged_metrics.get("val_loss", torch.tensor(0.0))
         val_loss = self.trainer.logged_metrics["val_loss"].item()
         self.epoch_loss_values.append(val_loss)
 
@@ -213,14 +200,21 @@ class BrainTumorSegmentation(pl.LightningModule):
 
     def on_train_end(self):
         # Print the best metric and epoch along with individual Dice scores at the end of training
-        print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}, "
-            f"tc: {self.metric_values_tc[-1]:.4f}, "
-            f"wt: {self.metric_values_wt[-1]:.4f}, "
-            f"et: {self.metric_values_et[-1]:.4f}.")
+        if len(self.metric_values_tc) > 0:
+            print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}, "
+                f"tc: {self.metric_values_tc[-1]:.4f}, "
+                f"wt: {self.metric_values_wt[-1]:.4f}, "
+                f"et: {self.metric_values_et[-1]:.4f}.")
+        else:
+            print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}")
 
     def configure_optimizers(self):
-        # SwinUNETR-V2 benefits from slightly higher learning rate
-        optimizer = AdamW(self.model.parameters(), lr=self.hparams.learning_rate, weight_decay=1e-5)
+        # Use parameters from args
+        optimizer = AdamW(
+            self.model.parameters(), 
+            lr=self.args.learning_rate, 
+            weight_decay=self.args.weight_decay
+        )
         
-        scheduler = CosineAnnealingLR(optimizer, T_max=self.hparams.max_epochs)
+        scheduler = CosineAnnealingLR(optimizer, T_max=self.args.epochs)
         return [optimizer], [scheduler]
