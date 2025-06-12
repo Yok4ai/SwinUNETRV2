@@ -558,16 +558,20 @@ class BrainTumorSegmentation(pl.LightningModule):
         total_params = self.model.count_parameters()
         print(f"🚀 Model initialized with {total_params:,} parameters ({total_params/1e6:.2f}M)")
         
+        # FIXED: Handle class weights separately
+        self.class_weights = torch.tensor([1.0, 2.0, 4.0]).to(self.device)
+        
         # FIXED: Use DiceCELoss for better class balance
         self.dice_ce_loss = DiceCELoss(
             include_background=False,  # FIXED: Exclude background
             to_onehot_y=True,  # FIXED: Convert labels to one-hot
             softmax=True,      # FIXED: Apply softmax
-            lambda_ce=0.5      # FIXED: Weight for CE loss component
+            weight=self.class_weights,  # FIXED: Use class weights for both losses
+            lambda_dice=1.0,   # FIXED: Weight for dice component
+            lambda_ce=1.0,     # FIXED: Weight for CE component
+            smooth_nr=1e-5,    # FIXED: Small constant for numerator
+            smooth_dr=1e-5     # FIXED: Small constant for denominator
         )
-        
-        # FIXED: Handle class weights separately
-        self.class_weights = torch.tensor([1.0, 2.0, 4.0]).to(self.device)
         
         self.dice_metric = DiceMetric(include_background=False, reduction="mean")  # FIXED: Exclude background
         self.dice_metric_batch = DiceMetric(include_background=False, reduction="mean_batch")  # FIXED: Exclude background
