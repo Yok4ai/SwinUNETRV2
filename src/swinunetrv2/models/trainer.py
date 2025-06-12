@@ -261,3 +261,6 @@ def get_performance_hybrid_config():
         "learning_rate": 3e-4,
         "sw_batch_size": 2,
     }
+
+# Add alias for backward compatibility
+setup_training = setup_hybrid_training
