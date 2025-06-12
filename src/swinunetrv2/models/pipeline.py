@@ -121,15 +121,14 @@ class BrainTumorSegmentation(pl.LightningModule):
 
         # FIXED: Proper metric calculation
         outputs_softmax = torch.softmax(outputs, dim=1)
-        outputs_onehot = torch.zeros_like(outputs)
-        outputs_onehot.scatter_(1, outputs_softmax.argmax(dim=1, keepdim=True), 1)
         
         # Convert labels to one-hot for metric calculation
         labels_onehot = torch.zeros_like(outputs)
         labels_onehot.scatter_(1, labels.long(), 1)
         
-        self.dice_metric(y_pred=outputs_onehot, y=labels_onehot)
-        self.dice_metric_batch(y_pred=outputs_onehot, y=labels_onehot)
+        # Use softmax outputs directly for metric calculation
+        self.dice_metric(y_pred=outputs_softmax, y=labels_onehot)
+        self.dice_metric_batch(y_pred=outputs_softmax, y=labels_onehot)
 
         train_dice = self.dice_metric.aggregate().item()
         self.log("train_mean_dice", train_dice, prog_bar=True)
