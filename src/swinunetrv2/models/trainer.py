@@ -85,7 +85,6 @@ def setup_training(train_ds, val_ds, args):
         check_val_every_n_epoch=args.val_interval,
         logger=wandb_logger,
         accumulate_grad_batches=args.accumulate_grad_batches,
-        strategy='ddp_find_unused_parameters_true' if torch.cuda.device_count() > 1 else None,
         enable_progress_bar=True,
         enable_model_summary=True,
         detect_anomaly=True

@@ -36,24 +36,6 @@ def optimize_gpu_usage():
     
     print("🔥 Enhanced GPU optimizations applied!")
 
-def estimate_parameters(args):
-    """Estimate model parameters"""
-    # Rough estimation for SwinUNETR with given parameters
-    embed_dim = args.embed_dim
-    depths = args.depths
-    
-    # Encoder parameters (rough estimate)
-    encoder_params = embed_dim * embed_dim * 8  # Patch embedding
-    for i, depth in enumerate(depths):
-        layer_dim = embed_dim * (2 ** i)
-        encoder_params += depth * layer_dim * layer_dim * 12  # Attention + MLP
-    
-    # Decoder parameters
-    decoder_params = args.decoder_embed_dim * sum([embed_dim * (2**i) for i in range(len(depths))])
-    decoder_params += args.decoder_embed_dim * args.decoder_embed_dim * 4
-    
-    return encoder_params + decoder_params
-
 # Setup the environment and prepare data
 output_dir = setup_kaggle_notebook()
 print(f"Dataset prepared in: {output_dir}")
@@ -91,6 +73,7 @@ args = argparse.Namespace(
     use_amp=True,
     gradient_clip_val=1.0,
     accumulate_grad_batches=4,  # Increased for effective batch size
+    strategy='auto',  # Added strategy parameter
     
     # Validation settings
     val_interval=1,
@@ -104,36 +87,6 @@ args = argparse.Namespace(
     overlap=0.25,
 )
 
-# Enhanced configuration validation
-def validate_improved_config(args):
-    """Enhanced validation for improved configuration"""
-    print("\n🔍 Validating optimized configuration...")
-    
-    # Basic validations
-    assert args.embed_dim == args.feature_size, f"embed_dim ({args.embed_dim}) should match feature_size ({args.feature_size})"
-    assert len(args.depths) == len(args.num_heads), "depths and num_heads must have same length"
-    assert args.window_size <= args.img_size // 4, f"window_size ({args.window_size}) too large for img_size ({args.img_size})"
-    assert args.patch_size <= args.img_size // 8, f"patch_size ({args.patch_size}) too large for img_size ({args.img_size})"
-    
-    # Memory estimations
-    estimated_params = estimate_parameters(args)
-    print(f"📊 Estimated parameters: {estimated_params/1e6:.1f}M")
-    
-    # Memory check
-    if torch.cuda.is_available():
-        gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
-        print(f"🔧 Available GPU memory: {gpu_memory:.1f} GB")
-        
-        # Rough memory estimation
-        estimated_memory = args.batch_size * 1.2  # GB per batch item
-        if estimated_memory > gpu_memory * 0.8:
-            print(f"⚠️  Warning: Estimated memory usage ({estimated_memory:.1f}GB) may exceed available memory")
-            print(f"   Consider reducing batch_size from {args.batch_size} to {int(args.batch_size * 0.7)}")
-    
-    print("✅ Optimized configuration validation passed!")
-
-# Validate configuration
-validate_improved_config(args)
 
 # Print final configuration summary
 print("\n=== 🚀 OPTIMIZED SWINUNETR CONFIGURATION ===")
