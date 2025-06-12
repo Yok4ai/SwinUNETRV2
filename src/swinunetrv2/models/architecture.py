@@ -88,10 +88,10 @@ class UltraEfficientSwinUNETR(nn.Module):
         # Create lightweight decoder components with correct feature dimensions
         # These dimensions match the actual encoder output channels from SwinUNETR
         feature_dims = [
-            self.feature_size * 16,  # From layer 4 (dec4)
-            self.feature_size * 8,   # From layer 3 (enc3)
-            self.feature_size * 4,   # From layer 2 (enc2)
-            self.feature_size * 2,   # From layer 1 (enc1)
+            self.feature_size * 8,   # From layer 4 (dec4)
+            self.feature_size * 4,   # From layer 3 (enc3)
+            self.feature_size * 2,   # From layer 2 (enc2)
+            self.feature_size,       # From layer 1 (enc1)
         ]
         
         # Print feature dimensions for debugging
