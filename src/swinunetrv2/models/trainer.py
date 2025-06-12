@@ -6,7 +6,7 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
 import wandb
-from .hybrid_pipeline import HybridBrainTumorSegmentation
+from .pipeline import HybridBrainTumorSegmentation
 
 
 def setup_hybrid_training(train_ds, val_ds, args):

@@ -11,7 +11,7 @@ def create_hybrid_args(preset="balanced"):
     """Create arguments for Hybrid SwinUNETR-SegFormer3D"""
     
     # Get preset configuration
-    from .hybrid_pipeline import get_hybrid_config
+    from .pipeline import get_hybrid_config
     config = get_hybrid_config(preset)
     
     return argparse.Namespace(
