@@ -7,7 +7,7 @@ from pytorch_lightning.callbacks.timer import Timer
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
 import wandb
-from .improved_architecture import ImprovedBrainTumorSegmentation
+from .architecture import ImprovedBrainTumorSegmentation
 
 
 class ImprovedEarlyStopping(EarlyStopping):
