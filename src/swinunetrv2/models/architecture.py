@@ -164,8 +164,9 @@ class EfficientMLP(nn.Module):
         B, N, C = x.shape
         x = self.fc1(x)
         
-        # Apply depthwise conv in spatial domain
-        x_spatial = x.transpose(1, 2).view(B, C, D, H, W)
+        # Apply depthwise conv in spatial domain - use the correct hidden_features dimension
+        _, _, hidden_features = x.shape
+        x_spatial = x.transpose(1, 2).view(B, hidden_features, D, H, W)
         x_spatial = self.dwconv(x_spatial)
         x_spatial = self.bn(x_spatial)
         x = x_spatial.flatten(2).transpose(1, 2)
