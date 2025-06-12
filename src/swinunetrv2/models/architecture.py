@@ -560,12 +560,10 @@ class BrainTumorSegmentation(pl.LightningModule):
         
         # FIXED: Use DiceCELoss for better class balance
         self.dice_ce_loss = DiceCELoss(
-            smooth_nr=1e-5,
-            smooth_dr=1e-5,
-            squared_pred=True,
+            include_background=False,  # FIXED: Exclude background
             to_onehot_y=True,  # FIXED: Convert labels to one-hot
             softmax=True,      # FIXED: Apply softmax
-            include_background=False  # FIXED: Exclude background
+            lambda_ce=0.5      # FIXED: Weight for CE loss component
         )
         
         # FIXED: Handle class weights separately
