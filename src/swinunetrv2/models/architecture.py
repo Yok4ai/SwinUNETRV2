@@ -1,17 +1,15 @@
-# architecture.py - Enhanced Parameter-Efficient SwinUNETR
+# architecture.py - SwinUNETR V2 + SegFormer3D Decoder
 import torch
 import torch.nn as nn
 from monai.networks.nets import SwinUNETR
-from monai.networks.blocks import UnetOutBlock, UnetrBasicBlock, UnetrUpBlock
-from monai.networks.layers import Conv
 import math
-from typing import Sequence, Union
 
 
-class UltraEfficientSwinUNETR(nn.Module):
+class HybridSwinUNETR(nn.Module):
     """
-    Ultra parameter-efficient SwinUNETR inspired by SegFormer3D efficiency techniques.
-    Reduces parameters by ~60-80% compared to standard MONAI SwinUNETR while maintaining performance.
+    Hybrid model combining:
+    - MONAI SwinUNETR V2 backbone (proven, stable)
+    - SegFormer3D-style efficient decoder (lightweight)
     """
     
     def __init__(
@@ -19,8 +17,8 @@ class UltraEfficientSwinUNETR(nn.Module):
         in_channels: int = 4,
         out_channels: int = 3,
         feature_size: int = 24,
-        depths: Sequence[int] = (1, 1, 2, 1),
-        num_heads: Sequence[int] = (2, 4, 8, 16),
+        depths: tuple = (1, 1, 2, 1),
+        num_heads: tuple = (2, 4, 8, 16),
         use_checkpoint: bool = True,
         use_v2: bool = True,
         spatial_dims: int = 3,
@@ -28,26 +26,20 @@ class UltraEfficientSwinUNETR(nn.Module):
         drop_rate: float = 0.1,
         attn_drop_rate: float = 0.1,
         dropout_path_rate: float = 0.1,
-        use_depthwise_conv: bool = True,
-        use_lightweight_decoder: bool = True,
-        decoder_channels: Sequence[int] = (96, 48, 24, 12),
-        reduce_skip_connections: bool = True,
-        use_separable_conv: bool = True,
+        # SegFormer3D decoder parameters
+        decoder_embedding_dim: int = 128,
+        decoder_dropout: float = 0.0,
+        use_segformer_decoder: bool = True,
     ):
         super().__init__()
         
-        # Validate feature size is divisible by 12
-        if feature_size % 12 != 0:
-            raise ValueError(f"feature_size must be divisible by 12, got {feature_size}")
-        
         self.feature_size = feature_size
-        self.spatial_dims = spatial_dims
-        self.use_lightweight_decoder = use_lightweight_decoder
+        self.use_segformer_decoder = use_segformer_decoder
         
-        # Create the base SwinUNETR with minimal feature size
+        # Create SwinUNETR V2 backbone (without final decoder)
         self.backbone = SwinUNETR(
             in_channels=in_channels,
-            out_channels=feature_size * 4,
+            out_channels=feature_size * 4,  # Dummy output, we'll replace decoder
             feature_size=feature_size,
             use_checkpoint=use_checkpoint,
             use_v2=use_v2,
@@ -58,379 +50,226 @@ class UltraEfficientSwinUNETR(nn.Module):
             drop_rate=drop_rate,
             attn_drop_rate=attn_drop_rate,
             dropout_path_rate=dropout_path_rate,
-            downsample="mergingv2"
+            downsample="mergingv2"  # Use V2 merging
         )
         
-        if use_lightweight_decoder:
-            self._replace_decoder_with_lightweight(
-                decoder_channels, 
-                out_channels, 
-                use_depthwise_conv,
-                use_separable_conv,
-                reduce_skip_connections
-            )
+        if use_segformer_decoder:
+            # Replace heavy decoder with SegFormer3D-style lightweight decoder
+            self._setup_segformer_decoder(decoder_embedding_dim, out_channels, decoder_dropout)
         
         self._display_parameter_info()
     
-    def _replace_decoder_with_lightweight(
-        self, 
-        decoder_channels, 
-        out_channels, 
-        use_depthwise_conv,
-        use_separable_conv,
-        reduce_skip_connections
-    ):
-        """Replace heavy decoder with SegFormer3D-style lightweight decoder"""
+    def _setup_segformer_decoder(self, decoder_embedding_dim, out_channels, decoder_dropout):
+        """Setup SegFormer3D-style efficient decoder"""
         
-        # Store encoder features for skip connections
-        self.encoder_features = []
-        
-        # Create lightweight decoder components with correct feature dimensions
-        # These dimensions match the actual encoder output channels from SwinUNETR
+        # Calculate feature dimensions from SwinUNETR stages
+        # These match the actual SwinUNETR encoder outputs
         feature_dims = [
-            self.feature_size * 32,  # From layer 4 (dec4)
-            self.feature_size * 16,   # From layer 3 (enc3)
-            self.feature_size * 8,   # From layer 2 (enc2)
-            self.feature_size * 4,   # From layer 1 (enc1)
+            self.feature_size,      # enc0 (original resolution)
+            self.feature_size * 2,  # enc1 
+            self.feature_size * 4,  # enc2
+            self.feature_size * 8,  # enc3
+            self.feature_size * 16, # dec4 (deepest)
         ]
         
-        # Print feature dimensions for debugging
-        print(f"\nExpected feature dimensions for projections: {feature_dims}")
+        print(f"Setting up SegFormer decoder with dims: {feature_dims}")
         
-        # MLP projections for each feature level (like SegFormer)
-        self.feature_projections = nn.ModuleList([
-            LightweightMLP(feature_dims[i], decoder_channels[0])
-            for i in range(4)
+        # SegFormer3D-style MLP projections for each feature level
+        self.mlp_projections = nn.ModuleList([
+            SegFormerMLP(feature_dims[4], decoder_embedding_dim),  # dec4
+            SegFormerMLP(feature_dims[3], decoder_embedding_dim),  # enc3
+            SegFormerMLP(feature_dims[2], decoder_embedding_dim),  # enc2
+            SegFormerMLP(feature_dims[1], decoder_embedding_dim),  # enc1
         ])
         
-        # Lightweight fusion module
-        self.feature_fusion = LightweightFusion(
-            in_channels=decoder_channels[0] * 4,
-            out_channels=decoder_channels[0],
-            use_depthwise=use_depthwise_conv,
-            use_separable=use_separable_conv
+        # SegFormer3D-style fusion and final prediction
+        self.feature_fusion = nn.Sequential(
+            nn.Conv3d(4 * decoder_embedding_dim, decoder_embedding_dim, 1, bias=False),
+            nn.BatchNorm3d(decoder_embedding_dim),
+            nn.ReLU(inplace=True),
         )
         
-        # Minimal upsampling decoder
-        self.lightweight_decoder = LightweightDecoder(
-            decoder_channels=decoder_channels,
-            out_channels=out_channels,
-            use_depthwise=use_depthwise_conv
-        )
+        self.dropout = nn.Dropout3d(decoder_dropout)
+        self.final_conv = nn.Conv3d(decoder_embedding_dim, out_channels, 1)
         
-        # Override the forward method to use our lightweight decoder
+        # Final upsampling to original resolution
+        self.final_upsample = nn.Upsample(scale_factor=4, mode='trilinear', align_corners=False)
+        
+        # Override forward method to use SegFormer decoder
+        self._hook_segformer_forward()
+    
+    def _hook_segformer_forward(self):
+        """Replace SwinUNETR forward with our hybrid approach"""
         original_forward = self.backbone.forward
         
-        def new_forward(x):
-            # Get encoder features
+        def hybrid_forward(x):
+            # Get SwinUNETR encoder features
             hidden_states_out = self.backbone.swinViT(x, self.backbone.normalize)
             
-            # Extract features at different scales
-            enc0 = self.backbone.encoder1(x)
-            enc1 = self.backbone.encoder2(hidden_states_out[0])  
-            enc2 = self.backbone.encoder3(hidden_states_out[1])
-            enc3 = self.backbone.encoder4(hidden_states_out[2])
-            dec4 = self.backbone.encoder10(hidden_states_out[4])
+            # Extract multi-scale features
+            enc0 = self.backbone.encoder1(x)                    # 1/4 resolution
+            enc1 = self.backbone.encoder2(hidden_states_out[0]) # 1/8 resolution  
+            enc2 = self.backbone.encoder3(hidden_states_out[1]) # 1/16 resolution
+            enc3 = self.backbone.encoder4(hidden_states_out[2]) # 1/32 resolution
+            dec4 = self.backbone.encoder10(hidden_states_out[4]) # 1/32 resolution (deepest)
             
-            # Store features for skip connections
-            self.encoder_features = [enc0, enc1, enc2, enc3, dec4]
-            
-            # Apply lightweight decoder
-            return self._lightweight_decode([enc0, enc1, enc2, enc3, dec4])
+            # Apply SegFormer3D decoder
+            return self._segformer_decode([enc0, enc1, enc2, enc3, dec4])
         
-        # Replace the forward method
-        self.backbone.forward = new_forward
+        self.backbone.forward = hybrid_forward
     
     def forward(self, x):
-        # Get encoder features
-        hidden_states_out = self.backbone.swinViT(x, self.backbone.normalize)
-        
-        # Extract features at different scales
-        enc0 = self.backbone.encoder1(x)
-        enc1 = self.backbone.encoder2(hidden_states_out[0])  
-        enc2 = self.backbone.encoder3(hidden_states_out[1])
-        enc3 = self.backbone.encoder4(hidden_states_out[2])
-        dec4 = self.backbone.encoder10(hidden_states_out[4])
-        
-        # Print actual feature dimensions for debugging
-        print(f"\nActual feature dimensions:")
-        print(f"enc0: {enc0.shape}")
-        print(f"enc1: {enc1.shape}")
-        print(f"enc2: {enc2.shape}")
-        print(f"enc3: {enc3.shape}")
-        print(f"dec4: {dec4.shape}")
-        
-        # Apply lightweight decoder
-        if self.use_lightweight_decoder:
-            return self._lightweight_decode([enc0, enc1, enc2, enc3, dec4])
+        if self.use_segformer_decoder:
+            # Use our hybrid forward (SwinUNETR encoder + SegFormer decoder)
+            return self.backbone(x)
         else:
-            # Fallback to original decoder (should not reach here)
+            # Use standard SwinUNETR
             return self.backbone(x)
     
-    def _lightweight_decode(self, features):
+    def _segformer_decode(self, features):
         """SegFormer3D-style lightweight decoding"""
         enc0, enc1, enc2, enc3, dec4 = features
         
-        # Project features to common dimension (like SegFormer's MLP decoder)
-        target_size = enc0.shape[2:]  # Use enc0 as reference size
+        # Use enc1 as reference size (1/4 of original input)
+        target_size = enc1.shape[2:]
         
+        # Project all features to common embedding dimension
         projected_features = []
-        feature_list = [dec4, enc3, enc2, enc1]  # Reverse order for processing
+        feature_list = [dec4, enc3, enc2, enc1]  # From deepest to shallowest
         
         for i, feat in enumerate(feature_list):
-            # Project to common channel dimension
-            proj_feat = self.feature_projections[i](feat)
+            # Project to common dimension
+            proj_feat = self.mlp_projections[i](feat)
             
-            # Upsample to target size
+            # Upsample to target size (enc1 size)
             if proj_feat.shape[2:] != target_size:
                 proj_feat = torch.nn.functional.interpolate(
                     proj_feat, size=target_size, mode='trilinear', align_corners=False
                 )
             projected_features.append(proj_feat)
         
-        # Fuse all features (SegFormer-style)
+        # Concatenate and fuse features (SegFormer3D style)
         fused = torch.cat(projected_features, dim=1)
         fused = self.feature_fusion(fused)
+        fused = self.dropout(fused)
         
-        # Final lightweight decoder
-        output = self.lightweight_decoder(fused)
+        # Final prediction
+        output = self.final_conv(fused)
         
-        # Upsample to original input size
-        if output.shape[2:] != (128, 128, 128):  # Assuming 128^3 input
-            output = torch.nn.functional.interpolate(
-                output, size=(128, 128, 128), mode='trilinear', align_corners=False
-            )
+        # Upsample to original input size (4x upsampling)
+        output = self.final_upsample(output)
         
         return output
     
     def count_parameters(self):
         """Count total trainable parameters"""
-        total_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        return total_params
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
     
     def _display_parameter_info(self):
-        """Display detailed parameter information"""
+        """Display parameter information"""
         total_params = self.count_parameters()
         
-        # Calculate component-wise parameters
-        backbone_params = sum(p.numel() for p in self.backbone.parameters() if p.requires_grad)
-        if hasattr(self, 'feature_projections'):
-            projection_params = sum(p.numel() for p in self.feature_projections.parameters() if p.requires_grad)
-            fusion_params = sum(p.numel() for p in self.feature_fusion.parameters() if p.requires_grad)
-            decoder_params = sum(p.numel() for p in self.lightweight_decoder.parameters() if p.requires_grad)
-        else:
-            projection_params = fusion_params = decoder_params = 0
-        
-        print(f"\n📊 Ultra-Efficient SwinUNETR Parameter Breakdown:")
-        print(f"   🔧 Feature size: {self.feature_size}")
+        print(f"\n📊 Hybrid SwinUNETR-SegFormer3D:")
+        print(f"   🏗️  Backbone: SwinUNETR V2 (feature_size={self.feature_size})")
+        print(f"   🎯 Decoder: SegFormer3D-style MLP decoder")
         print(f"   📈 Total parameters: {total_params:,} ({total_params/1e6:.2f}M)")
-        print(f"   🏗️  Backbone: {backbone_params:,} ({backbone_params/1e6:.2f}M)")
-        if projection_params > 0:
-            print(f"   🔗 Projections: {projection_params:,} ({projection_params/1e6:.2f}M)")
-            print(f"   🔀 Fusion: {fusion_params:,} ({fusion_params/1e6:.2f}M)")
-            print(f"   📤 Decoder: {decoder_params:,} ({decoder_params/1e6:.2f}M)")
         
-        # Compare with standard SwinUNETR
-        standard_estimate = self._estimate_standard_swinunetr_params()
-        reduction = (1 - total_params / standard_estimate) * 100
-        print(f"   📉 Parameter reduction: {reduction:.1f}% vs standard MONAI SwinUNETR")
-    
-    def _estimate_standard_swinunetr_params(self):
-        """Estimate parameters for standard MONAI SwinUNETR with feature_size=48"""
-        # Rough estimation based on MONAI SwinUNETR architecture
-        return 62e6  # Approximately 62M parameters for standard config
+        # Component breakdown
+        if hasattr(self, 'mlp_projections'):
+            backbone_params = sum(p.numel() for p in self.backbone.parameters() if p.requires_grad)
+            decoder_params = total_params - backbone_params
+            
+            print(f"   🔧 Backbone: {backbone_params:,} ({backbone_params/1e6:.2f}M)")
+            print(f"   🔗 SegFormer decoder: {decoder_params:,} ({decoder_params/1e6:.2f}M)")
+        
+        # Efficiency comparison
+        standard_swinunetr = 62e6
+        efficiency_gain = (1 - total_params / standard_swinunetr) * 100
+        print(f"   📉 Parameter reduction: {efficiency_gain:.1f}% vs standard SwinUNETR")
 
 
-class LightweightMLP(nn.Module):
-    """Lightweight MLP projection inspired by SegFormer"""
+class SegFormerMLP(nn.Module):
+    """SegFormer3D-style MLP projection module"""
     
     def __init__(self, input_dim, output_dim):
         super().__init__()
-        # Ensure input_dim matches the actual input channels
-        self.proj = nn.Conv3d(input_dim, output_dim, kernel_size=1)
-        self.norm = nn.BatchNorm3d(output_dim)
-        
+        self.proj = nn.Linear(input_dim, output_dim)
+        self.norm = nn.LayerNorm(output_dim)
+    
     def forward(self, x):
-        # Add shape check for debugging
-        if x.shape[1] != self.proj.in_channels:
-            raise ValueError(f"Expected input channels {self.proj.in_channels}, got {x.shape[1]}")
-        x = self.proj(x)
-        x = self.norm(x)
+        # x: (B, C, D, H, W) -> (B, D*H*W, C) -> (B, D*H*W, output_dim) -> (B, output_dim, D, H, W)
+        B, C, D, H, W = x.shape
+        
+        # Flatten spatial dimensions and apply MLP
+        x = x.flatten(2).transpose(1, 2)  # (B, D*H*W, C)
+        x = self.proj(x)                  # (B, D*H*W, output_dim)
+        x = self.norm(x)                  # (B, D*H*W, output_dim)
+        
+        # Reshape back to spatial format
+        x = x.transpose(1, 2).reshape(B, -1, D, H, W)  # (B, output_dim, D, H, W)
+        
         return x
 
 
-class LightweightFusion(nn.Module):
-    """Lightweight feature fusion module"""
-    
-    def __init__(self, in_channels, out_channels, use_depthwise=True, use_separable=True):
-        super().__init__()
-        
-        if use_separable:
-            # Separable convolution: depthwise + pointwise
-            self.fusion = nn.Sequential(
-                nn.Conv3d(in_channels, in_channels, kernel_size=3, padding=1, groups=in_channels),
-                nn.BatchNorm3d(in_channels),
-                nn.ReLU(inplace=True),
-                nn.Conv3d(in_channels, out_channels, kernel_size=1),
-                nn.BatchNorm3d(out_channels),
-                nn.ReLU(inplace=True)
-            )
-        elif use_depthwise:
-            # Depthwise convolution
-            self.fusion = nn.Sequential(
-                nn.Conv3d(in_channels, out_channels, kernel_size=3, padding=1, groups=min(in_channels, out_channels)),
-                nn.BatchNorm3d(out_channels),
-                nn.ReLU(inplace=True)
-            )
-        else:
-            # Standard convolution
-            self.fusion = nn.Sequential(
-                nn.Conv3d(in_channels, out_channels, kernel_size=1),
-                nn.BatchNorm3d(out_channels),
-                nn.ReLU(inplace=True)
-            )
-    
-    def forward(self, x):
-        return self.fusion(x)
-
-
-class LightweightDecoder(nn.Module):
-    """Ultra-lightweight decoder with minimal parameters"""
-    
-    def __init__(self, decoder_channels, out_channels, use_depthwise=True):
-        super().__init__()
-        
-        layers = []
-        in_ch = decoder_channels[0]
-        
-        for out_ch in decoder_channels[1:]:
-            if use_depthwise:
-                layers.extend([
-                    nn.Conv3d(in_ch, in_ch, kernel_size=3, padding=1, groups=in_ch),
-                    nn.Conv3d(in_ch, out_ch, kernel_size=1),
-                    nn.BatchNorm3d(out_ch),
-                    nn.ReLU(inplace=True)
-                ])
-            else:
-                layers.extend([
-                    nn.Conv3d(in_ch, out_ch, kernel_size=3, padding=1),
-                    nn.BatchNorm3d(out_ch),
-                    nn.ReLU(inplace=True)
-                ])
-            in_ch = out_ch
-        
-        # Final output layer
-        layers.append(nn.Conv3d(in_ch, out_channels, kernel_size=1))
-        
-        self.decoder = nn.Sequential(*layers)
-    
-    def forward(self, x):
-        return self.decoder(x)
-    
-
-
-
-
-
-# Alternative ultra-lightweight configuration inspired by SegFormer3D
-class SegFormerStyleSwinUNETR(UltraEfficientSwinUNETR):
-    """SegFormer3D-style configuration with extreme efficiency"""
-    
-    def __init__(self, **kwargs):
-        # Override with SegFormer3D-like parameters
-        segformer_config = {
-            'feature_size': 12,  # Changed from 16 to be divisible by 12
-            'depths': (1, 1, 1, 1),  # Minimal depths
-            'num_heads': (1, 2, 4, 8),  # Small attention heads
-            'decoder_channels': (48, 24, 12, 6),  # Adjusted to match feature size
-            'use_depthwise_conv': True,
-            'use_lightweight_decoder': True,
-            'use_separable_conv': True,
-            'reduce_skip_connections': True,
-        }
-        segformer_config.update(kwargs)
-        super().__init__(**segformer_config)
-
-
-# Factory function for easy configuration selection
-def create_efficient_swinunetr(efficiency_level="balanced", **kwargs):
+# Factory function for easy usage
+def create_hybrid_swinunetr(
+    efficiency_level="balanced",
+    decoder_embedding_dim=128,
+    use_segformer_decoder=True,
+    **kwargs
+):
     """
-    Factory function to create different efficiency levels of SwinUNETR
+    Create hybrid model with different efficiency levels
     
     Args:
-        efficiency_level: "ultra", "high", "balanced", "performance"
+        efficiency_level: "light", "balanced", "performance"
+        decoder_embedding_dim: SegFormer decoder embedding dimension
+        use_segformer_decoder: Use SegFormer3D-style decoder vs standard
     """
     
-    if efficiency_level == "ultra":
-        # ~5-8M parameters - SegFormer3D-like efficiency
-        config = {
-            'feature_size': 12,  # Changed from 16 to be divisible by 12
-            'depths': (1, 1, 1, 1),
-            'num_heads': (1, 2, 4, 8),
-            'decoder_channels': (48, 24, 12, 6),  # Adjusted to match feature size
+    configs = {
+        "light": {
+            "feature_size": 24,
+            "depths": (1, 1, 1, 1),
+            "num_heads": (2, 4, 8, 16),
+            "decoder_embedding_dim": 96,
+        },
+        "balanced": {
+            "feature_size": 32,  
+            "depths": (1, 1, 2, 1),
+            "num_heads": (2, 4, 8, 16),
+            "decoder_embedding_dim": 128,
+        },
+        "performance": {
+            "feature_size": 48,
+            "depths": (2, 2, 2, 2),
+            "num_heads": (3, 6, 12, 24),
+            "decoder_embedding_dim": 192,
         }
-        return SegFormerStyleSwinUNETR(**{**config, **kwargs})
+    }
     
-    elif efficiency_level == "high":
-        # ~10-15M parameters
-        config = {
-            'feature_size': 24,  # Already divisible by 12
-            'depths': (1, 1, 2, 1),
-            'num_heads': (2, 4, 6, 12),
-            'decoder_channels': (96, 48, 24, 12),
-        }
-        return UltraEfficientSwinUNETR(**{**config, **kwargs})
-    
-    elif efficiency_level == "balanced":
-        # ~15-25M parameters (your current target)
-        config = {
-            'feature_size': 24,  # Already divisible by 12
-            'depths': (1, 1, 2, 1),
-            'num_heads': (2, 4, 8, 16),
-            'decoder_channels': (96, 48, 24, 12),
-        }
-        return UltraEfficientSwinUNETR(**{**config, **kwargs})
-    
-    elif efficiency_level == "performance":
-        # ~25-35M parameters - more performance focused
-        config = {
-            'feature_size': 36,  # Changed from 32 to be divisible by 12
-            'depths': (2, 2, 2, 2),
-            'num_heads': (3, 6, 12, 24),
-            'decoder_channels': (144, 72, 36, 18),  # Adjusted to match feature size
-        }
-        return UltraEfficientSwinUNETR(**{**config, **kwargs})
-    
-    else:
+    if efficiency_level not in configs:
         raise ValueError(f"Unknown efficiency level: {efficiency_level}")
-
-
-
-# Compatibility wrapper for your existing pipeline
-class ParameterEfficientSwinUNETR(UltraEfficientSwinUNETR):
-    """Backward compatibility wrapper"""
     
-    def __init__(self, **kwargs):
-        # Map old parameters to new system
-        if 'feature_size' not in kwargs:
-            kwargs['feature_size'] = 24
-        if 'depths' not in kwargs:
-            kwargs['depths'] = (1, 1, 2, 1)
-        
-        super().__init__(**kwargs)
+    config = configs[efficiency_level]
+    config.update(kwargs)
+    config["use_segformer_decoder"] = use_segformer_decoder
+    config["decoder_embedding_dim"] = decoder_embedding_dim
+    
+    return HybridSwinUNETR(**config)
 
 
 if __name__ == "__main__":
-    # Test different efficiency levels
-    print("Testing different efficiency levels:\n")
+    # Test the hybrid model
+    print("Testing Hybrid SwinUNETR-SegFormer3D:")
     
-    for level in ["ultra", "high", "balanced", "performance"]:
-        print(f"=== {level.upper()} EFFICIENCY ===")
-        model = create_efficient_swinunetr(level)
-        
-        # Test forward pass
-        x = torch.randn(1, 4, 128, 128, 128)
-        with torch.no_grad():
-            y = model(x)
-        print(f"Output shape: {y.shape}")
-        print()
+    model = create_hybrid_swinunetr(efficiency_level="balanced")
+    
+    # Test forward pass
+    x = torch.randn(1, 4, 128, 128, 128)
+    with torch.no_grad():
+        y = model(x)
+    
+    print(f"Input shape: {x.shape}")
+    print(f"Output shape: {y.shape}")
+    print("✅ Hybrid model working correctly!")
