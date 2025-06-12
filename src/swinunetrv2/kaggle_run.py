@@ -54,7 +54,6 @@ def estimate_parameters(args):
     
     return encoder_params + decoder_params
 
-
 # Setup the environment and prepare data
 output_dir = setup_kaggle_notebook()
 print(f"Dataset prepared in: {output_dir}")
@@ -62,47 +61,42 @@ print(f"Dataset prepared in: {output_dir}")
 # Apply enhanced GPU optimizations
 optimize_gpu_usage()
 
-
-# 🎯 FIXED CONFIGURATION FOR BETTER PERFORMANCE
+# 🎯 OPTIMIZED CONFIGURATION FOR BETTER PERFORMANCE
 args = argparse.Namespace(
-    # Data parameters - keeping your working values
+    # Data parameters
     input_dir='/kaggle/working',
-    batch_size=4,  # FIXED: Reduced batch size for stability
+    batch_size=2,  # Reduced for stability
     num_workers=4,
     pin_memory=True,
-    persistent_workers=False,  # Disabled to fix pickling error
+    persistent_workers=False,
     
-    # 🚀 FIXED MODEL PARAMETERS (Standard SwinUNETR)
+    # Model parameters
     img_size=128,
-    in_channels=4,  # 4 modalities for BraTS
-    out_channels=3,  # 3 tumor regions
-    feature_size=96,  # FIXED: Standard SwinUNETR dimension
-    embed_dim=96,    # FIXED: Standard SwinUNETR embedding dimension
-    depths=[2, 2, 6, 2],  # Keep proven architecture
-    num_heads=[3, 6, 12, 24],  # FIXED: Proper head scaling
-    window_size=7,    # FIXED: Standard window size
-    mlp_ratio=4.0,    # FIXED: Standard MLP ratio
-    decoder_embed_dim=256,  # FIXED: Larger decoder for better representation
+    in_channels=4,
+    out_channels=3,
+    feature_size=96,
+    depths=[2, 2, 6, 2],
+    num_heads=[3, 6, 12, 24],
     patch_size=4,
     drop_rate=0.1,
     attn_drop_rate=0.1,
-    use_checkpoint=True,  # Enable checkpointing for memory efficiency
+    use_checkpoint=True,
     
-    # 📈 FIXED TRAINING PARAMETERS
-    learning_rate=5e-4,  # FIXED: More conservative learning rate
-    weight_decay=1e-5,   # FIXED: Reduced weight decay
-    epochs=30,  # Keep 30 epochs
-    warmup_epochs=5,  # FIXED: Reduced warmup
+    # Training parameters
+    learning_rate=1e-4,  # More conservative
+    weight_decay=1e-5,
+    epochs=50,  # Increased epochs
+    warmup_epochs=5,
     device='cuda',
     use_amp=True,
     gradient_clip_val=1.0,
-    accumulate_grad_batches=3,  # FIXED: Increased accumulation (effective batch = 12)
+    accumulate_grad_batches=4,  # Increased for effective batch size
     
-    # Enhanced validation settings
+    # Validation settings
     val_interval=1,
-    save_interval=3,
-    early_stopping_patience=10,
-    limit_val_batches=5,  # Faster validation
+    save_interval=1,
+    early_stopping_patience=15,
+    limit_val_batches=10,  # Increased for better validation
     
     # Inference parameters
     roi_size=[128, 128, 128],
@@ -113,7 +107,7 @@ args = argparse.Namespace(
 # Enhanced configuration validation
 def validate_improved_config(args):
     """Enhanced validation for improved configuration"""
-    print("\n🔍 Validating fixed configuration...")
+    print("\n🔍 Validating optimized configuration...")
     
     # Basic validations
     assert args.embed_dim == args.feature_size, f"embed_dim ({args.embed_dim}) should match feature_size ({args.feature_size})"
@@ -130,28 +124,23 @@ def validate_improved_config(args):
         gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
         print(f"🔧 Available GPU memory: {gpu_memory:.1f} GB")
         
-        # Rough memory estimation (very approximate)
-        estimated_memory = args.batch_size * 1.2  # GB per batch item (larger model)
+        # Rough memory estimation
+        estimated_memory = args.batch_size * 1.2  # GB per batch item
         if estimated_memory > gpu_memory * 0.8:
             print(f"⚠️  Warning: Estimated memory usage ({estimated_memory:.1f}GB) may exceed available memory")
             print(f"   Consider reducing batch_size from {args.batch_size} to {int(args.batch_size * 0.7)}")
     
-    print("✅ Fixed configuration validation passed!")
-
+    print("✅ Optimized configuration validation passed!")
 
 # Validate configuration
 validate_improved_config(args)
 
 # Print final configuration summary
-print("\n=== 🚀 FIXED LIGHTWEIGHT SWINUNETR CONFIGURATION ===")
+print("\n=== 🚀 OPTIMIZED SWINUNETR CONFIGURATION ===")
 print(f"🎯 Batch size: {args.batch_size} (effective: {args.batch_size * args.accumulate_grad_batches})")
 print(f"📐 Image size: {args.img_size}")
-print(f"🧠 Embed dim: {args.embed_dim} (FIXED: Standard SwinUNETR)")
-print(f"🏗️  Depths: {args.depths}")
-print(f"👁️  Num heads: {args.num_heads} (FIXED: Proper scaling)")
-print(f"🪟 Window size: {args.window_size} (FIXED: Standard)")
-print(f"🔧 Decoder embed dim: {args.decoder_embed_dim} (FIXED: Larger)")
-print(f"⚡ Learning rate: {args.learning_rate} (FIXED: Conservative)")
+print(f"👁️  Num heads: {args.num_heads}")
+print(f"⚡ Learning rate: {args.learning_rate}")
 print(f"🔄 SW batch size: {args.sw_batch_size}")
 print(f"🕐 Warmup epochs: {args.warmup_epochs}")
 print(f"📊 Total epochs: {args.epochs}")
@@ -159,12 +148,12 @@ print(f"📊 Total epochs: {args.epochs}")
 def run_with_error_handling():
     """Run training with comprehensive error handling"""
     try:
-        print("\n🚀 Starting training with FIXED configuration...")
+        print("\n🚀 Starting training with optimized configuration...")
         print("Expected improvements:")
-        print("  • Better TC segmentation (major issue fixed)")
-        print("  • Improved ET detection")
+        print("  • Better model checkpointing")
+        print("  • Improved validation metrics")
         print("  • More stable training")
-        print("  • Faster convergence")
+        print("  • Better memory management")
         
         main(args)
         
@@ -173,9 +162,9 @@ def run_with_error_handling():
             print(f"\n❌ CUDA Out of Memory Error!")
             print("🔧 Suggested fixes:")
             print(f"1. Reduce batch_size from {args.batch_size} to {args.batch_size//2}")
-            print("2. Reduce accumulate_grad_batches from 3 to 2")
-            print("3. Reduce sw_batch_size from 2 to 1")
-            print("4. Reduce decoder_embed_dim from 256 to 192")
+            print("2. Reduce accumulate_grad_batches from {args.accumulate_grad_batches} to {args.accumulate_grad_batches//2}")
+            print("3. Reduce sw_batch_size from {args.sw_batch_size} to 1")
+            print("4. Reduce decoder_embed_dim from {args.decoder_embed_dim} to 192")
         else:
             print(f"❌ Runtime error: {e}")
         raise e
@@ -183,20 +172,20 @@ def run_with_error_handling():
     except ImportError as e:
         print(f"❌ Import error: {e}")
         print("🔧 Suggested fixes:")
-        print("1. Make sure the fixed architecture.py is in your swinunetrv2 package")
-        print("2. Update your main.py to support the fixed model")
-        print("3. Check that all required dependencies are installed")
+        print("1. Make sure all required packages are installed")
+        print("2. Check for version conflicts")
+        print("3. Verify the package structure")
         raise e
         
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
         print("\n🔧 General troubleshooting:")
-        print("1. Check that your swinunetrv2 package supports the fixed model")
-        print("2. Verify all configuration parameters are valid")
-        print("3. Make sure dataset is properly formatted")
-        print("4. Check file permissions and disk space")
+        print("1. Check GPU memory usage")
+        print("2. Verify dataset integrity")
+        print("3. Check file permissions")
+        print("4. Monitor system resources")
         raise e
 
-# Start fixed training
+# Start optimized training
 if __name__ == "__main__":
     run_with_error_handling()
