@@ -148,42 +148,23 @@ print(f"📊 Total epochs: {args.epochs}")
 def run_with_error_handling():
     """Run training with comprehensive error handling"""
     try:
-        print("\n🚀 Starting training with optimized configuration...")
-        print("Expected improvements:")
-        print("  • Better model checkpointing")
-        print("  • Improved validation metrics")
-        print("  • More stable training")
-        print("  • Better memory management")
         
         main(args)
         
     except RuntimeError as e:
         if "out of memory" in str(e).lower():
             print(f"\n❌ CUDA Out of Memory Error!")
-            print("🔧 Suggested fixes:")
-            print(f"1. Reduce batch_size from {args.batch_size} to {args.batch_size//2}")
-            print("2. Reduce accumulate_grad_batches from {args.accumulate_grad_batches} to {args.accumulate_grad_batches//2}")
-            print("3. Reduce sw_batch_size from {args.sw_batch_size} to 1")
-            print("4. Reduce decoder_embed_dim from {args.decoder_embed_dim} to 192")
+
         else:
             print(f"❌ Runtime error: {e}")
         raise e
         
     except ImportError as e:
         print(f"❌ Import error: {e}")
-        print("🔧 Suggested fixes:")
-        print("1. Make sure all required packages are installed")
-        print("2. Check for version conflicts")
-        print("3. Verify the package structure")
         raise e
         
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
-        print("\n🔧 General troubleshooting:")
-        print("1. Check GPU memory usage")
-        print("2. Verify dataset integrity")
-        print("3. Check file permissions")
-        print("4. Monitor system resources")
         raise e
 
 # Start optimized training

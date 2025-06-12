@@ -6,7 +6,7 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 import wandb
-from .architecture import BrainTumorSegmentation
+from .architecture import LightweightSwinUNETR
 
 def setup_training(train_ds, val_ds, args):
     # Data loaders
@@ -54,7 +54,7 @@ def setup_training(train_ds, val_ds, args):
     )
 
     # Initialize model
-    model = BrainTumorSegmentation(
+    model = LightweightSwinUNETR(
         train_loader,
         val_loader,
         max_epochs=args.epochs,
