@@ -61,12 +61,12 @@ def setup_training(train_ds, val_ds, args):
         save_last=True
     )
 
-    # Initialize wandb logger
-    wandb_logger = WandbLogger(
-        project="brain-tumor-segmentation",
-        name="swinunetr-v2-brats23",
-        log_model=True
-    )
+    # # Initialize wandb logger
+    # wandb_logger = WandbLogger(
+    #     project="brain-tumor-segmentation",
+    #     name="swinunetr-v2-brats23",
+    #     log_model=True
+    # )
 
     # Initialize model with args - much cleaner parameter passing
     model = BrainTumorSegmentation(
@@ -87,7 +87,7 @@ def setup_training(train_ds, val_ds, args):
         callbacks=[early_stop_callback, checkpoint_callback],
         limit_val_batches=args.limit_val_batches,
         check_val_every_n_epoch=args.val_interval,
-        logger=wandb_logger,
+        # logger=wandb_logger,
         accumulate_grad_batches=args.accumulate_grad_batches,
         enable_progress_bar=True,
         # Memory optimization settings
