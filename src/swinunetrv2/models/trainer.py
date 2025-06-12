@@ -55,7 +55,7 @@ def setup_training(train_ds, val_ds, args):
     )
 
     # Initialize model
-    model = BrainTumorSegmentation(
+    model = BrainTumorModel(
         train_loader=train_loader,
         val_loader=val_loader,
         max_epochs=args.epochs,
