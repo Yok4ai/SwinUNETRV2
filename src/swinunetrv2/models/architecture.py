@@ -82,15 +82,10 @@ class UltraEfficientSwinUNETR(nn.Module):
     ):
         """Replace heavy decoder with SegFormer3D-style lightweight decoder"""
         
-        # Remove the original heavy decoder
-        del self.backbone.decoder0
-        del self.backbone.decoder1 
-        del self.backbone.decoder2
-        del self.backbone.decoder3
-        del self.backbone.decoder4
-        del self.backbone.out
+        # Store encoder features for skip connections
+        self.encoder_features = []
         
-        # Lightweight decoder inspired by SegFormer's All-MLP decoder
+        # Create lightweight decoder components
         feature_dims = [
             self.feature_size * 16,  # From layer 4
             self.feature_size * 8,   # From layer 3  
@@ -118,6 +113,29 @@ class UltraEfficientSwinUNETR(nn.Module):
             out_channels=out_channels,
             use_depthwise=use_depthwise_conv
         )
+        
+        # Override the forward method to use our lightweight decoder
+        original_forward = self.backbone.forward
+        
+        def new_forward(x):
+            # Get encoder features
+            hidden_states_out = self.backbone.swinViT(x, self.backbone.normalize)
+            
+            # Extract features at different scales
+            enc0 = self.backbone.encoder1(x)
+            enc1 = self.backbone.encoder2(hidden_states_out[0])  
+            enc2 = self.backbone.encoder3(hidden_states_out[1])
+            enc3 = self.backbone.encoder4(hidden_states_out[2])
+            dec4 = self.backbone.encoder10(hidden_states_out[4])
+            
+            # Store features for skip connections
+            self.encoder_features = [enc0, enc1, enc2, enc3, dec4]
+            
+            # Apply lightweight decoder
+            return self._lightweight_decode([enc0, enc1, enc2, enc3, dec4])
+        
+        # Replace the forward method
+        self.backbone.forward = new_forward
     
     def forward(self, x):
         # Get encoder features

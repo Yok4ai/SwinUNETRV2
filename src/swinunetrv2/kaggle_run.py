@@ -1,6 +1,6 @@
 # run.py - Ultra-Efficient SwinUNETR with SegFormer3D-like efficiency
 from swinunetrv2.kaggle_setup import setup_kaggle_notebook
-from swinunetrv2.main import main
+from swinunetrv2.main import main as train_model
 import argparse
 import torch
 import warnings
@@ -172,7 +172,7 @@ def validate_config(args):
     
     print("\n✅ Configuration validated!")
 
-def main():
+def run_training():
     """Main training execution"""
     # Setup environment
     output_dir = setup_kaggle_notebook()
@@ -187,7 +187,7 @@ def main():
     
     # Run training
     try:
-        main(args)
+        train_model(args)
     except Exception as e:
         print(f"❌ Training failed: {e}")
         if "out of memory" in str(e).lower():
@@ -198,4 +198,4 @@ def main():
         raise e
 
 if __name__ == "__main__":
-    main()
+    run_training()
