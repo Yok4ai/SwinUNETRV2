@@ -33,6 +33,7 @@ args = argparse.Namespace(
     num_workers=3,
     pin_memory=True,
     persistent_workers=False,
+    dataset="brats2021",  # Added dataset option
     
     # Model parameters
     img_size=96,
@@ -85,6 +86,7 @@ print(f"📐 Image size: {args.img_size}")
 print(f"⚡ Learning rate: {args.learning_rate}")
 print(f"🔄 SW batch size: {args.sw_batch_size}")
 print(f"📊 Total epochs: {args.epochs}")
+print(f"🗂️ Dataset: {args.dataset}")
 
 def run_with_error_handling():
     """Run training with comprehensive error handling"""

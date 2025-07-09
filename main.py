@@ -25,7 +25,7 @@ def main(args):
 
     # Step 1: Setup MONAI transforms
     print("Step 1: Setting up MONAI transforms...")
-    train_transforms, val_transforms = get_transforms(img_size=args.img_size)
+    train_transforms, val_transforms = get_transforms(img_size=args.img_size, dataset=args.dataset)
     
     # Step 2: Create dataloaders
     print("Step 2: Creating dataloaders...")
@@ -70,6 +70,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_mlp_decoder", action="store_true", help="Enable MLP decoder in enhanced model")
     parser.add_argument("--mlp_hidden_ratio", type=int, default=4, help="MLP hidden ratio for enhanced model")
     parser.add_argument("--dropout_rate", type=float, default=0.1, help="Dropout rate for enhanced model")
+    parser.add_argument("--dataset", type=str, required=True, help="Dataset type (e.g., 'brats2021', 'brats2023')")
     
     # Parse arguments
     args = parser.parse_args()
