@@ -66,7 +66,6 @@ args = argparse.Namespace(
     # Inference parameters
     roi_size=[64, 64, 64],  # Reduced ROI size
     sw_batch_size=1,
-    overlap=0.25,
 )
 
 # Print final configuration summary

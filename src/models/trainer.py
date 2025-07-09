@@ -56,7 +56,6 @@ def setup_training(train_loader, val_loader, args):
         learning_rate=args.learning_rate,
         roi_size=args.roi_size,
         sw_batch_size=args.sw_batch_size,
-        overlap=args.overlap,
         use_v2=args.use_v2,
         depths=args.depths,
         num_heads=args.num_heads,
