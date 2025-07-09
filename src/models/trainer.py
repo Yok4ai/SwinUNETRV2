@@ -77,7 +77,7 @@ def setup_training(train_loader, val_loader, args):
         benchmark=args.benchmark,
         limit_val_batches=args.limit_val_batches,
         check_val_every_n_epoch=args.val_interval,
-        logger=args.logger,
+        logger=wandb_logger,
         profiler=args.profiler
     )
 

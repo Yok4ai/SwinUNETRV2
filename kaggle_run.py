@@ -49,7 +49,6 @@ args = argparse.Namespace(
     log_every_n_steps=1,
     enable_checkpointing=True,
     benchmark=True,
-    logger=wandb_logger,
     profiler="simple",
     use_amp=True,  # Enable mixed precision
     gradient_clip_val=1.0,
