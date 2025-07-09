@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from monai.losses import DiceLoss, DiceCELoss, FocalLoss
-from monai.metrics import DiceMetric
+from monai.metrics import DiceMetric, MeanIoU
 from monai.transforms import Compose, Activations, AsDiscrete
 from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset
 from monai.inferers import sliding_window_inference
@@ -201,6 +201,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Standard Dice Loss Metrics
         self.dice_metric = DiceMetric(include_background=True, reduction="mean")
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
+        self.jaccard_metric = MeanIoU(include_background=True, reduction="mean", ignore_empty=True)
 
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
         
@@ -252,10 +253,13 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Compute Dice
         self.dice_metric(y_pred=outputs, y=labels)
         self.dice_metric_batch(y_pred=outputs, y=labels)
+        self.jaccard_metric(y_pred=outputs, y=labels)
 
         # Log Train Dice 
         train_dice = self.dice_metric.aggregate().item()
+        train_iou = self.jaccard_metric.aggregate().item()
         self.log("train_mean_dice", train_dice, prog_bar=True)
+        self.log("train_mean_iou", train_iou, prog_bar=True)
 
         # Store metrics
         self.train_metric_values.append(train_dice)
@@ -272,6 +276,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Reset metrics
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
+        self.jaccard_metric.reset()
 
         return loss
 
@@ -304,10 +309,12 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Compute Dice
         self.dice_metric(y_pred=val_outputs, y=val_labels)
         self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
+        self.jaccard_metric(y_pred=val_outputs, y=val_labels)
         return {"val_loss": val_loss}
 
     def on_validation_epoch_end(self):
         val_dice = self.dice_metric.aggregate().item()
+        val_iou = self.jaccard_metric.aggregate().item()
         self.metric_values.append(val_dice)
 
         val_loss = self.trainer.logged_metrics["val_loss"].item()
@@ -321,6 +328,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Log validation metrics
         self.log("val_loss", val_loss, prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_mean_dice", val_dice, prog_bar=True, on_epoch=True, sync_dist=True)
+        self.log("val_mean_iou", val_iou, prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_tc", metric_batch[0].item(), prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_wt", metric_batch[1].item(), prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_et", metric_batch[2].item(), prog_bar=True, on_epoch=True, sync_dist=True)
@@ -335,6 +343,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Reset metrics
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
+        self.jaccard_metric.reset()
 
     def on_train_end(self):
         print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}, "
