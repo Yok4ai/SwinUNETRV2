@@ -17,7 +17,7 @@ from monai.transforms import (
 )
 from data.convert_labels import ConvertLabels
 
-def get_transforms(img_size):
+def get_transforms(img_size, dataset="brats2023"):
     """Get training and validation transforms for BraTS data."""
     train_transforms = Compose(
         [
@@ -25,7 +25,7 @@ def get_transforms(img_size):
         LoadImaged(keys=["image", "label"]),
         EnsureChannelFirstd(keys="image"),
         EnsureTyped(keys=["image", "label"]),
-        ConvertLabels(keys="label"),
+        ConvertLabels(keys="label", dataset=dataset),
         Orientationd(keys=["image", "label"], axcodes="RAS"),
         Spacingd(
             keys=["image", "label"],
@@ -71,7 +71,7 @@ def get_transforms(img_size):
         LoadImaged(keys=["image", "label"]),
         EnsureChannelFirstd(keys="image"),
         EnsureTyped(keys=["image", "label"]),
-        ConvertLabels(keys="label"),
+        ConvertLabels(keys="label", dataset=dataset),
         Orientationd(keys=["image", "label"], axcodes="RAS"),
         Spacingd(
             keys=["image", "label"],

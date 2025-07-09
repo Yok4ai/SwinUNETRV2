@@ -4,7 +4,7 @@
 This project implements a SwinUNETR-V2-based pipeline for brain tumor segmentation using MONAI and PyTorch Lightning. The codebase is modular, with clear separation between data processing, model architecture, training, and utilities.
 
 ## Folder Structure
-- `src/data/`: Data loading, augmentation, and label conversion.
+- `src/data/`: Data loading, augmentation, and label conversion (now supports a `dataset` argument for BRATS 2021/2023 label conventions).
 - `src/models/`: Model architecture (SwinUNETR), training pipeline, and PyTorch Lightning integration.
 - `src/utils/`: Visualization and utility functions.
 - `main.py`: Entry point for training.
@@ -34,6 +34,7 @@ This project implements a SwinUNETR-V2-based pipeline for brain tumor segmentati
 - Data is loaded and split (80/20 train/val) from `dataset.json`.
 - Augmentations and label conversion are handled in `src/data/`.
 - Training and validation transforms are modular and configurable.
+- **Label conversion now supports a `dataset` argument to select between BRATS 2021 and BRATS 2023 label conventions.**
 
 ## Model & Training
 - SwinUNETR-V2 is the core model, with configurable depths, heads, and feature sizes.
@@ -46,4 +47,5 @@ This project implements a SwinUNETR-V2-based pipeline for brain tumor segmentati
 ## Changes & Extensions
 - All changes must be reflected in the docs (`architecture.md`, `cursor.md`, `scratchpad.md`).
 - Major refactors or new modules should be described in `architecture.md`.
-- Use `scratchpad.md` for brainstorming, TODOs, and experimental notes. 
+- Use `scratchpad.md` for brainstorming, TODOs, and experimental notes.
+- **If you add new dataset options or label conventions, document them here and in `architecture.md`.** 

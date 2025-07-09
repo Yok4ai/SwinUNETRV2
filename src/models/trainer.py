@@ -43,7 +43,7 @@ def setup_training(train_loader, val_loader, args):
     # Initialize wandb logger
     wandb_logger = WandbLogger(
         project="brain-tumor-segmentation",
-        name="swinunetr-v2",
+        name="swinunetr-v2-experimental",
         log_model=True
     )
 
@@ -60,6 +60,11 @@ def setup_training(train_loader, val_loader, args):
         depths=args.depths,
         num_heads=args.num_heads,
         downsample=args.downsample,
+        use_enhanced_model=getattr(args, 'use_enhanced_model', False),
+        use_modality_attention=getattr(args, 'use_modality_attention', True),
+        use_mlp_decoder=getattr(args, 'use_mlp_decoder', True),
+        mlp_hidden_ratio=getattr(args, 'mlp_hidden_ratio', 4),
+        dropout_rate=getattr(args, 'dropout_rate', 0.1),
     )
 
     # Setup trainer

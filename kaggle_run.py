@@ -25,14 +25,15 @@ print(f"Dataset prepared in: {output_dir}")
 # Apply enhanced GPU optimizations
 # optimize_gpu_usage()
 
-# 🎯 OPTIMIZED CONFIGURATION FOR BETTER PERFORMANCE
+# Experimental Configuration
 args = argparse.Namespace(
     # Data parameters
     input_dir='/kaggle/working',
-    batch_size=3,
+    batch_size=2,
     num_workers=3,
     pin_memory=True,
     persistent_workers=False,
+    dataset="brats2023",  # Added dataset option
     
     # Model parameters
     img_size=96,
@@ -59,6 +60,13 @@ args = argparse.Namespace(
     num_heads=(3, 6, 12, 24),
     downsample="mergingv2",
     
+    # Enhanced model options
+    use_enhanced_model=True,  # Enable enhanced model for experimentation
+    use_modality_attention=True,
+    use_mlp_decoder=True,
+    mlp_hidden_ratio=4,
+    dropout_rate=0.1,
+    
     # Validation settings
     val_interval=1,
     save_interval=1,
@@ -78,6 +86,7 @@ print(f"📐 Image size: {args.img_size}")
 print(f"⚡ Learning rate: {args.learning_rate}")
 print(f"🔄 SW batch size: {args.sw_batch_size}")
 print(f"📊 Total epochs: {args.epochs}")
+print(f"🗂️ Dataset: {args.dataset}")
 
 def run_with_error_handling():
     """Run training with comprehensive error handling"""

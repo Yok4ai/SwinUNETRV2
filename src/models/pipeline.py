@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from monai.losses import DiceLoss, DiceCELoss, FocalLoss
-from monai.metrics import DiceMetric
+from monai.metrics import DiceMetric, MeanIoU, HausdorffDistanceMetric
 from monai.transforms import Compose, Activations, AsDiscrete
 from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset
 from monai.inferers import sliding_window_inference
@@ -19,6 +19,119 @@ from pytorch_lightning.loggers import WandbLogger
 from models.swinunetr import SwinUNETR
 import math
 
+class ModalityAttentionModule(nn.Module):
+    """
+    Modality Attention Module for better feature extraction across different MRI modalities.
+    Learns importance weights for each modality channel.
+    """
+    def __init__(self, in_channels: int = 4, reduction_ratio: int = 2):
+        super().__init__()
+        self.in_channels = in_channels
+        # Channel attention components
+        self.global_avg_pool = nn.AdaptiveAvgPool3d(1)
+        self.global_max_pool = nn.AdaptiveMaxPool3d(1)
+        # Shared MLP
+        hidden_channels = max(1, in_channels // reduction_ratio)
+        self.channel_mlp = nn.Sequential(
+            nn.Linear(in_channels, hidden_channels),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_channels, in_channels)
+        )
+        # Spatial attention components
+        self.spatial_conv = nn.Conv3d(2, 1, kernel_size=7, padding=3, bias=False)
+        self.sigmoid = nn.Sigmoid()
+    def forward(self, x):
+        batch_size, channels, d, h, w = x.size()
+        # Channel attention
+        avg_pool = self.global_avg_pool(x).view(batch_size, channels)
+        max_pool = self.global_max_pool(x).view(batch_size, channels)
+        avg_out = self.channel_mlp(avg_pool)
+        max_out = self.channel_mlp(max_pool)
+        channel_attention = self.sigmoid(avg_out + max_out).view(batch_size, channels, 1, 1, 1)
+        x_channel = x * channel_attention
+        # Spatial attention
+        avg_spatial = torch.mean(x_channel, dim=1, keepdim=True)
+        max_spatial, _ = torch.max(x_channel, dim=1, keepdim=True)
+        spatial_concat = torch.cat([avg_spatial, max_spatial], dim=1)
+        spatial_attention = self.sigmoid(self.spatial_conv(spatial_concat))
+        x_refined = x_channel * spatial_attention
+        return x_refined + x  # Residual connection
+
+class MLPDecoder(nn.Module):
+    """
+    MLP Decoder module to reduce over-parameterization in the decoder.
+    """
+    def __init__(self, in_channels: int, hidden_channels: int, out_channels: int, dropout_rate: float = 0.1):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(in_channels, hidden_channels),
+            nn.LayerNorm(hidden_channels),
+            nn.GELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(hidden_channels, hidden_channels // 2),
+            nn.LayerNorm(hidden_channels // 2),
+            nn.GELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(hidden_channels // 2, out_channels)
+        )
+    def forward(self, x):
+        b, c, d, h, w = x.shape
+        x = x.permute(0, 2, 3, 4, 1).contiguous()  # (B, D, H, W, C)
+        x = x.view(-1, c)  # (B*D*H*W, C)
+        x = self.mlp(x)
+        x = x.view(b, d, h, w, -1)
+        x = x.permute(0, 4, 1, 2, 3).contiguous()  # (B, C, D, H, W)
+        return x
+
+class EnhancedSwinUNETR(nn.Module):
+    """
+    Enhanced SwinUNETR with Modality Attention and MLP Decoder.
+    """
+    def __init__(self, 
+                 in_channels: int = 4,
+                 out_channels: int = 3,
+                 feature_size: int = 48,
+                 use_modality_attention: bool = True,
+                 use_mlp_decoder: bool = True,
+                 mlp_hidden_ratio: int = 4,
+                 dropout_rate: float = 0.1,
+                 **kwargs):
+        super().__init__()
+        self.use_modality_attention = use_modality_attention
+        if use_modality_attention:
+            self.modality_attention = ModalityAttentionModule(in_channels)
+        self.swin_unetr = SwinUNETR(
+            in_channels=in_channels,
+            out_channels=out_channels if not use_mlp_decoder else feature_size,
+            feature_size=feature_size,
+            use_checkpoint=True,
+            use_v2=True,
+            spatial_dims=3,
+            depths=(2, 2, 2, 2),
+            num_heads=(3, 6, 12, 24),
+            norm_name="instance",
+            drop_rate=0.0,
+            attn_drop_rate=0.0,
+            dropout_path_rate=0.0,
+            downsample="mergingv2"
+        )
+        self.use_mlp_decoder = use_mlp_decoder
+        if use_mlp_decoder:
+            mlp_hidden = feature_size * mlp_hidden_ratio
+            self.mlp_decoder = MLPDecoder(
+                in_channels=feature_size,
+                hidden_channels=mlp_hidden,
+                out_channels=out_channels,
+                dropout_rate=dropout_rate
+            )
+    def forward(self, x):
+        if self.use_modality_attention:
+            x = self.modality_attention(x)
+        x = self.swin_unetr(x)
+        if self.use_mlp_decoder:
+            x = self.mlp_decoder(x)
+        return x
+
 class BrainTumorSegmentation(pl.LightningModule):
     def __init__(self, train_loader, val_loader, max_epochs=100,
                  val_interval=1, learning_rate=1e-4, feature_size=48,
@@ -26,28 +139,44 @@ class BrainTumorSegmentation(pl.LightningModule):
                  sw_batch_size=2, use_v2=True, depths=(2, 2, 2, 2),
                  num_heads=(3, 6, 12, 24), downsample="mergingv2",
                  use_class_weights=True,
+                 use_enhanced_model=False,  # NEW ARGUMENT
+                 use_modality_attention=True,  # For EnhancedSwinUNETR
+                 use_mlp_decoder=True,        # For EnhancedSwinUNETR
+                 mlp_hidden_ratio=4,          # For EnhancedSwinUNETR
+                 dropout_rate=0.1,            # For EnhancedSwinUNETR
                  ):
         
         super().__init__()
         self.save_hyperparameters()
         
         # Base SwinUNETR model
-        self.model = SwinUNETR(
-            in_channels=4,
-            out_channels=3,
-            feature_size=self.hparams.feature_size,
-            use_checkpoint=True,
-            use_v2=self.hparams.use_v2,
-            spatial_dims=3,
-            depths=self.hparams.depths,
-            num_heads=self.hparams.num_heads,
-            norm_name="instance",
-            drop_rate=0.0,
-            attn_drop_rate=0.0,
-            dropout_path_rate=0.0,
-            downsample=self.hparams.downsample,
-            
-        )
+        if self.hparams.use_enhanced_model:
+            self.model = EnhancedSwinUNETR(
+                in_channels=4,
+                out_channels=3,
+                feature_size=self.hparams.feature_size,
+                use_modality_attention=self.hparams.use_modality_attention,
+                use_mlp_decoder=self.hparams.use_mlp_decoder,
+                mlp_hidden_ratio=self.hparams.mlp_hidden_ratio,
+                dropout_rate=self.hparams.dropout_rate
+            )
+        else:
+            self.model = SwinUNETR(
+                in_channels=4,
+                out_channels=3,
+                feature_size=self.hparams.feature_size,
+                use_checkpoint=True,
+                use_v2=self.hparams.use_v2,
+                spatial_dims=3,
+                depths=self.hparams.depths,
+                num_heads=self.hparams.num_heads,
+                norm_name="instance",
+                drop_rate=0.0,
+                attn_drop_rate=0.0,
+                dropout_path_rate=0.0,
+                downsample=self.hparams.downsample,
+                
+            )
         
         # Class weights based on BraTS imbalance: ET (most rare) > TC > WT
         if self.hparams.use_class_weights:
@@ -72,6 +201,8 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Standard Dice Loss Metrics
         self.dice_metric = DiceMetric(include_background=True, reduction="mean")
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
+        self.jaccard_metric = MeanIoU(include_background=True, reduction="mean", ignore_empty=True)
+        self.hausdorff_metric = HausdorffDistanceMetric(include_background=False, reduction="mean")
 
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
         
@@ -107,6 +238,25 @@ class BrainTumorSegmentation(pl.LightningModule):
         total_loss = 0.6 * dice_ce_loss + 0.4 * focal_loss
         return total_loss
 
+    def compute_metrics(self, outputs, labels):
+        """Compute mean precision, recall, and F1 score for the batch."""
+        # outputs, labels: (B, C, D, H, W)
+        outputs = torch.stack(outputs) if isinstance(outputs, list) else outputs
+        labels = torch.stack(labels) if isinstance(labels, list) else labels
+        outputs = outputs.float()
+        labels = labels.float()
+        # Flatten all but batch
+        outputs = outputs.view(outputs.size(0), -1)
+        labels = labels.view(labels.size(0), -1)
+        # True Positives, False Positives, False Negatives
+        tp = (outputs * labels).sum(dim=1)
+        fp = (outputs * (1 - labels)).sum(dim=1)
+        fn = ((1 - outputs) * labels).sum(dim=1)
+        precision = tp / (tp + fp + 1e-8)
+        recall = tp / (tp + fn + 1e-8)
+        f1 = 2 * precision * recall / (precision + recall + 1e-8)
+        return precision.mean().item(), recall.mean().item(), f1.mean().item()
+
     def training_step(self, batch, batch_idx):
         inputs, labels = batch["image"], batch["label"]
 
@@ -123,10 +273,30 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Compute Dice
         self.dice_metric(y_pred=outputs, y=labels)
         self.dice_metric_batch(y_pred=outputs, y=labels)
+        self.jaccard_metric(y_pred=outputs, y=labels)
+        # Compute Hausdorff
+        self.hausdorff_metric(y_pred=outputs, y=labels)
+        hausdorff_values = self.hausdorff_metric.aggregate(reduction='none')
+        if not isinstance(hausdorff_values, torch.Tensor):
+            hausdorff_values = torch.tensor(hausdorff_values)
+        valid = torch.isfinite(hausdorff_values)
+        if valid.any():
+            train_hausdorff = hausdorff_values[valid].mean().item()
+        else:
+            train_hausdorff = float('nan')
+        self.log("train_hausdorff", train_hausdorff, prog_bar=True)
 
         # Log Train Dice 
         train_dice = self.dice_metric.aggregate().item()
+        train_iou = self.jaccard_metric.aggregate().item()
         self.log("train_mean_dice", train_dice, prog_bar=True)
+        self.log("train_mean_iou", train_iou, prog_bar=True)
+
+        # Compute and log mean precision, recall, F1
+        precision, recall, f1 = self.compute_metrics(outputs, decollate_batch(labels))
+        self.log("train_mean_precision", precision, prog_bar=True)
+        self.log("train_mean_recall", recall, prog_bar=True)
+        self.log("train_mean_f1", f1, prog_bar=True)
 
         # Store metrics
         self.train_metric_values.append(train_dice)
@@ -143,6 +313,8 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Reset metrics
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
+        self.jaccard_metric.reset()
+        self.hausdorff_metric.reset()
 
         return loss
 
@@ -175,10 +347,29 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Compute Dice
         self.dice_metric(y_pred=val_outputs, y=val_labels)
         self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
+        self.jaccard_metric(y_pred=val_outputs, y=val_labels)
+        self.hausdorff_metric(y_pred=val_outputs, y=val_labels)
+
+        val_hausdorff_values = self.hausdorff_metric.aggregate(reduction='none')
+        if not isinstance(val_hausdorff_values, torch.Tensor):
+            val_hausdorff_values = torch.tensor(val_hausdorff_values)
+        val_valid = torch.isfinite(val_hausdorff_values)
+        if val_valid.any():
+            val_hausdorff = val_hausdorff_values[val_valid].mean().item()
+        else:
+            val_hausdorff = float('nan')
+        self.log("val_hausdorff", val_hausdorff, prog_bar=True, on_epoch=True, sync_dist=True)
+
+        # Compute and log mean precision, recall, F1
+        precision, recall, f1 = self.compute_metrics(val_outputs, decollate_batch(val_labels))
+        self.log("val_mean_precision", precision, prog_bar=True, on_epoch=True, sync_dist=True)
+        self.log("val_mean_recall", recall, prog_bar=True, on_epoch=True, sync_dist=True)
+        self.log("val_mean_f1", f1, prog_bar=True, on_epoch=True, sync_dist=True)
         return {"val_loss": val_loss}
 
     def on_validation_epoch_end(self):
         val_dice = self.dice_metric.aggregate().item()
+        val_iou = self.jaccard_metric.aggregate().item()
         self.metric_values.append(val_dice)
 
         val_loss = self.trainer.logged_metrics["val_loss"].item()
@@ -192,20 +383,43 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Log validation metrics
         self.log("val_loss", val_loss, prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_mean_dice", val_dice, prog_bar=True, on_epoch=True, sync_dist=True)
+        self.log("val_mean_iou", val_iou, prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_tc", metric_batch[0].item(), prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_wt", metric_batch[1].item(), prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_et", metric_batch[2].item(), prog_bar=True, on_epoch=True, sync_dist=True)
 
-    
         if val_dice > self.best_metric:
             self.best_metric = val_dice
             self.best_metric_epoch = self.current_epoch
             torch.save(self.model.state_dict(), "best_metric_model_swinunetr_v2.pth")
             self.log("best_metric", self.best_metric, sync_dist=True, on_epoch=True)
-    
+            # Save best metrics for printing
+            self.best_metric_tc = metric_batch[0].item()
+            self.best_metric_wt = metric_batch[1].item()
+            self.best_metric_et = metric_batch[2].item()
+            self.best_metric_iou = val_iou
+            # Try to get best Hausdorff from logs if available
+            try:
+                self.best_metric_hausdorff = self.trainer.logged_metrics["val_hausdorff"].item()
+            except Exception:
+                self.best_metric_hausdorff = float('nan')
+
+        # Print best metrics after every validation epoch
+        if hasattr(self.trainer, 'is_global_zero') and self.trainer.is_global_zero:
+            print("\n=== Best Validation Metrics So Far ===")
+            print(f"Best Mean Dice: {getattr(self, 'best_metric', float('nan')):.4f} at epoch {getattr(self, 'best_metric_epoch', 'N/A')}")
+            print(f"Best TC Dice: {getattr(self, 'best_metric_tc', float('nan')):.4f}")
+            print(f"Best WT Dice: {getattr(self, 'best_metric_wt', float('nan')):.4f}")
+            print(f"Best ET Dice: {getattr(self, 'best_metric_et', float('nan')):.4f}")
+            print(f"Best Mean IoU: {getattr(self, 'best_metric_iou', float('nan')):.4f}")
+            print(f"Best Hausdorff: {getattr(self, 'best_metric_hausdorff', float('nan')):.4f}")
+            print("======================================\n")
+
         # Reset metrics
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
+        self.jaccard_metric.reset()
+        self.hausdorff_metric.reset()
 
     def on_train_end(self):
         print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}, "
