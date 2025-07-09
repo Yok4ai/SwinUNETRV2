@@ -45,12 +45,28 @@ SWINUNETRV2
 
 ## Execution Flow
 
-The code follows this sequence:
-1. `convert_labels.py`: Convert and preprocess the input labels
-2. `augmentations.py`: Set up data augmentation transforms
-3. `dataloader.py`: Create data loaders for training and validation
-4. `swinunetr.py`: Initialize the SwinUNETR model
-5. `trainer.py`: Train the model
+The training pipeline is orchestrated as follows:
+
+1. **kaggle_run.py** (or run locally):
+    - Sets up the environment (e.g., prepares data, applies Kaggle-specific settings).
+    - Defines all parameters for data, model, training, validation, and inference in a single `args` block.
+    - Calls the `main` function from `main.py` with these parameters.
+
+2. **main.py**:
+    - Receives the `args` namespace and coordinates the full training pipeline:
+      1. **Data Augmentation**: Calls `get_transforms` from `src/data/augmentations.py` to set up MONAI transforms for training and validation.
+      2. **Data Loading**: Calls `get_dataloaders` from `src/data/dataloader.py` to create PyTorch DataLoaders using the transforms and dataset split.
+      3. **Model & Trainer Setup**: Calls `setup_training` from `src/models/trainer.py` to initialize the SwinUNETR model (via `BrainTumorSegmentation` in `src/models/pipeline.py`) and the PyTorch Lightning Trainer with all callbacks and logging.
+      4. **Training**: Calls `train_model` from `src/models/trainer.py` to start the training loop, validation, and checkpointing.
+
+3. **Model Details**:
+    - The SwinUNETR model is defined in `src/models/swinunetr.py` and wrapped by `BrainTumorSegmentation` in `src/models/pipeline.py` for training, validation, and logging.
+    - Training and validation metrics, early stopping, and checkpointing are handled by PyTorch Lightning.
+
+**Summary:**
+- Edit parameters in `kaggle_run.py`.
+- Run `kaggle_run.py` (on Kaggle or locally).
+- The script will handle all steps: data transforms, loading, model setup, and training.
 
 ## Usage
 
