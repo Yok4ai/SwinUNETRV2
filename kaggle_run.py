@@ -29,14 +29,14 @@ print(f"Dataset prepared in: {output_dir}")
 args = argparse.Namespace(
     # Data parameters
     input_dir='/kaggle/working',
-    batch_size=4,
+    batch_size=3,
     num_workers=3,
     pin_memory=True,
     persistent_workers=False,
     
     # Model parameters
     img_size=96,
-    in_channels=4,
+    in_channels=3,
     out_channels=3,
     feature_size=48,
 
