@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from monai.losses import DiceLoss, DiceCELoss, FocalLoss
-from monai.metrics import DiceMetric, MeanIoU
+from monai.metrics import DiceMetric, MeanIoU, HausdorffDistanceMetric
 from monai.transforms import Compose, Activations, AsDiscrete
 from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset
 from monai.inferers import sliding_window_inference
@@ -202,6 +202,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric = DiceMetric(include_background=True, reduction="mean")
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
         self.jaccard_metric = MeanIoU(include_background=True, reduction="mean", ignore_empty=True)
+        self.hausdorff_metric = HausdorffDistanceMetric(include_background=False, reduction="mean")
 
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
         
@@ -237,6 +238,25 @@ class BrainTumorSegmentation(pl.LightningModule):
         total_loss = 0.6 * dice_ce_loss + 0.4 * focal_loss
         return total_loss
 
+    def compute_metrics(self, outputs, labels):
+        """Compute mean precision, recall, and F1 score for the batch."""
+        # outputs, labels: (B, C, D, H, W)
+        outputs = torch.stack(outputs) if isinstance(outputs, list) else outputs
+        labels = torch.stack(labels) if isinstance(labels, list) else labels
+        outputs = outputs.float()
+        labels = labels.float()
+        # Flatten all but batch
+        outputs = outputs.view(outputs.size(0), -1)
+        labels = labels.view(labels.size(0), -1)
+        # True Positives, False Positives, False Negatives
+        tp = (outputs * labels).sum(dim=1)
+        fp = (outputs * (1 - labels)).sum(dim=1)
+        fn = ((1 - outputs) * labels).sum(dim=1)
+        precision = tp / (tp + fp + 1e-8)
+        recall = tp / (tp + fn + 1e-8)
+        f1 = 2 * precision * recall / (precision + recall + 1e-8)
+        return precision.mean().item(), recall.mean().item(), f1.mean().item()
+
     def training_step(self, batch, batch_idx):
         inputs, labels = batch["image"], batch["label"]
 
@@ -254,12 +274,29 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric(y_pred=outputs, y=labels)
         self.dice_metric_batch(y_pred=outputs, y=labels)
         self.jaccard_metric(y_pred=outputs, y=labels)
+        # Compute Hausdorff
+        self.hausdorff_metric(y_pred=outputs, y=labels)
+        hausdorff_values = self.hausdorff_metric.aggregate(reduction='none')
+        if not isinstance(hausdorff_values, torch.Tensor):
+            hausdorff_values = torch.tensor(hausdorff_values)
+        valid = torch.isfinite(hausdorff_values)
+        if valid.any():
+            train_hausdorff = hausdorff_values[valid].mean().item()
+        else:
+            train_hausdorff = float('nan')
+        self.log("train_hausdorff", train_hausdorff, prog_bar=True)
 
         # Log Train Dice 
         train_dice = self.dice_metric.aggregate().item()
         train_iou = self.jaccard_metric.aggregate().item()
         self.log("train_mean_dice", train_dice, prog_bar=True)
         self.log("train_mean_iou", train_iou, prog_bar=True)
+
+        # Compute and log mean precision, recall, F1
+        precision, recall, f1 = self.compute_metrics(outputs, decollate_batch(labels))
+        self.log("train_mean_precision", precision, prog_bar=True)
+        self.log("train_mean_recall", recall, prog_bar=True)
+        self.log("train_mean_f1", f1, prog_bar=True)
 
         # Store metrics
         self.train_metric_values.append(train_dice)
@@ -277,6 +314,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
         self.jaccard_metric.reset()
+        self.hausdorff_metric.reset()
 
         return loss
 
@@ -310,6 +348,23 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric(y_pred=val_outputs, y=val_labels)
         self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
         self.jaccard_metric(y_pred=val_outputs, y=val_labels)
+        self.hausdorff_metric(y_pred=val_outputs, y=val_labels)
+
+        val_hausdorff_values = self.hausdorff_metric.aggregate(reduction='none')
+        if not isinstance(val_hausdorff_values, torch.Tensor):
+            val_hausdorff_values = torch.tensor(val_hausdorff_values)
+        val_valid = torch.isfinite(val_hausdorff_values)
+        if val_valid.any():
+            val_hausdorff = val_hausdorff_values[val_valid].mean().item()
+        else:
+            val_hausdorff = float('nan')
+        self.log("val_hausdorff", val_hausdorff, prog_bar=True, on_epoch=True, sync_dist=True)
+
+        # Compute and log mean precision, recall, F1
+        precision, recall, f1 = self.compute_metrics(val_outputs, decollate_batch(val_labels))
+        self.log("val_mean_precision", precision, prog_bar=True, on_epoch=True, sync_dist=True)
+        self.log("val_mean_recall", recall, prog_bar=True, on_epoch=True, sync_dist=True)
+        self.log("val_mean_f1", f1, prog_bar=True, on_epoch=True, sync_dist=True)
         return {"val_loss": val_loss}
 
     def on_validation_epoch_end(self):
@@ -333,17 +388,38 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.log("val_wt", metric_batch[1].item(), prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_et", metric_batch[2].item(), prog_bar=True, on_epoch=True, sync_dist=True)
 
-    
         if val_dice > self.best_metric:
             self.best_metric = val_dice
             self.best_metric_epoch = self.current_epoch
             torch.save(self.model.state_dict(), "best_metric_model_swinunetr_v2.pth")
             self.log("best_metric", self.best_metric, sync_dist=True, on_epoch=True)
-    
+            # Save best metrics for printing
+            self.best_metric_tc = metric_batch[0].item()
+            self.best_metric_wt = metric_batch[1].item()
+            self.best_metric_et = metric_batch[2].item()
+            self.best_metric_iou = val_iou
+            # Try to get best Hausdorff from logs if available
+            try:
+                self.best_metric_hausdorff = self.trainer.logged_metrics["val_hausdorff"].item()
+            except Exception:
+                self.best_metric_hausdorff = float('nan')
+
+        # Print best metrics after every validation epoch
+        if hasattr(self.trainer, 'is_global_zero') and self.trainer.is_global_zero:
+            print("\n=== Best Validation Metrics So Far ===")
+            print(f"Best Mean Dice: {getattr(self, 'best_metric', float('nan')):.4f} at epoch {getattr(self, 'best_metric_epoch', 'N/A')}")
+            print(f"Best TC Dice: {getattr(self, 'best_metric_tc', float('nan')):.4f}")
+            print(f"Best WT Dice: {getattr(self, 'best_metric_wt', float('nan')):.4f}")
+            print(f"Best ET Dice: {getattr(self, 'best_metric_et', float('nan')):.4f}")
+            print(f"Best Mean IoU: {getattr(self, 'best_metric_iou', float('nan')):.4f}")
+            print(f"Best Hausdorff: {getattr(self, 'best_metric_hausdorff', float('nan')):.4f}")
+            print("======================================\n")
+
         # Reset metrics
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
         self.jaccard_metric.reset()
+        self.hausdorff_metric.reset()
 
     def on_train_end(self):
         print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}, "

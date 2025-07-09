@@ -33,7 +33,7 @@ args = argparse.Namespace(
     num_workers=3,
     pin_memory=True,
     persistent_workers=False,
-    dataset="brats2021",  # Added dataset option
+    dataset="brats2023",  # Added dataset option
     
     # Model parameters
     img_size=96,
