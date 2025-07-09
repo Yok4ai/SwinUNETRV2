@@ -7,7 +7,7 @@ class ConvertLabels(MapTransform):
 #     label 1 is Necrotic Tumor Core (NCR)
 #     label 2 is Edema (ED)
 #     label 3 is Enhancing Tumor (ET)
-#     label 0 is everything else (non-tumor)
+#     label 0 is everything else (background)
 #     """
 
     def __call__(self, data):

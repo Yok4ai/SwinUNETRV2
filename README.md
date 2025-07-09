@@ -27,15 +27,14 @@ pip install -e .
 ## Project Structure
 
 ```
-swinunetrv2/
+SWINUNETRV2
 ├── src/
-│   └── swinunetrv2/
-│       ├── models/         # Model architecture
-│       ├── data/          # Data loading and augmentation
-│       ├── utils/         # Utility functions
-│       └── configs/       # Configuration files
-├── tests/                 # Test files
+│     ├── models/         # Model architecture
+│     ├── data/          # Data loading and augmentation
+│     ├── utils/         # Utility functions
 ├── setup.py              # Package setup file
+├── kaggle_run.py
+├── main.py
 └── requirements.txt      # Project dependencies
 ```
 

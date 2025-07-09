@@ -19,7 +19,7 @@ setup(
     ],
     python_requires=">=3.7",
     author="Imroz R",
-    author_email="your.email@example.com",
+    author_email="imrozeshan@gmail.com",
     description="SwinUNETR V2 for medical image segmentation",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
