@@ -24,7 +24,7 @@ def prepare_brats_data(input_dir, output_dir, dataset="brats2023"):
             t1c.append(os.path.join(file_paths[i], file_names[i] + '-t1c.nii', file_names[i] + '-t1c.nii'))
             t1n.append(os.path.join(file_paths[i], file_names[i] + '-t1n.nii', file_names[i] + '-t1n.nii'))
             t2f.append(os.path.join(file_paths[i], file_names[i] + '-t2f.nii', file_names[i] + '-t2f.nii'))
-            t2w.append(os.path.join(file_paths[i], file_names[i] + '-t2w.nii', file_names[i] + '-t2w.nii'))
+            t2w.append(os.path.join(file_paths[i], file_names[i] + '-t2.nii', file_names[i] + '-t2.nii'))
             label.append(os.path.join(file_paths[i], file_names[i] + '-seg.nii', file_names[i] + '-seg.nii'))
         else:
             t1c.append(os.path.join(file_paths[i], file_names[i] + '-t1c.nii'))
