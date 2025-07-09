@@ -66,7 +66,7 @@ def setup_training(train_loader, val_loader, args):
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         devices=torch.cuda.device_count(),
-        accelerator=args.device,
+        accelerator=args.accelerator,
         precision=args.precision,
         strategy=args.strategy,
         gradient_clip_val=args.gradient_clip_val,
