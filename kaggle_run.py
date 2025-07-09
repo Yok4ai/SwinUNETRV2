@@ -1,4 +1,6 @@
 # run.py
+import sys
+import os
 from kaggle_setup import setup_kaggle_notebook
 from main import main
 import argparse
@@ -21,7 +23,7 @@ output_dir = setup_kaggle_notebook()
 print(f"Dataset prepared in: {output_dir}")
 
 # Apply enhanced GPU optimizations
-optimize_gpu_usage()
+# optimize_gpu_usage()
 
 # 🎯 OPTIMIZED CONFIGURATION FOR BETTER PERFORMANCE
 args = argparse.Namespace(
@@ -43,9 +45,9 @@ args = argparse.Namespace(
     weight_decay=1e-5,
     epochs=5,
     accelerator='gpu',
-    device_count=torch.cuda.device_count(),
+    device_count=2,
     precision='16-mixed',
-    strategy="ddp",
+    strategy="ddp_notebook",
     log_every_n_steps=1,
     enable_checkpointing=True,
     benchmark=True,
@@ -66,6 +68,7 @@ args = argparse.Namespace(
     # Inference parameters
     roi_size=[64, 64, 64],  # Reduced ROI size
     sw_batch_size=1,
+    overlap=0.25,
 )
 
 # Print final configuration summary
