@@ -29,16 +29,16 @@ print(f"Dataset prepared in: {output_dir}")
 args = argparse.Namespace(
     # Data parameters
     input_dir='/kaggle/working',
-    batch_size=1,  # Reduced for stability
-    num_workers=2,
+    batch_size=4,
+    num_workers=3,
     pin_memory=True,
     persistent_workers=False,
     
     # Model parameters
-    img_size=64,
+    img_size=96,
     in_channels=4,
     out_channels=3,
-    feature_size=24,
+    feature_size=48,
 
     # Training parameters
     learning_rate=1e-4,  # More conservative
@@ -66,7 +66,7 @@ args = argparse.Namespace(
     limit_val_batches=5,  # Reduced for memory efficiency
     
     # Inference parameters
-    roi_size=[64, 64, 64],  # Reduced ROI size
+    roi_size=[96, 96, 96],  # Reduced ROI size
     sw_batch_size=1,
     overlap=0.25,
 )
