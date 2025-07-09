@@ -25,11 +25,11 @@ print(f"Dataset prepared in: {output_dir}")
 # Apply enhanced GPU optimizations
 # optimize_gpu_usage()
 
-# 🎯 OPTIMIZED CONFIGURATION FOR BETTER PERFORMANCE
+# Experimental Configuration
 args = argparse.Namespace(
     # Data parameters
     input_dir='/kaggle/working',
-    batch_size=3,
+    batch_size=2,
     num_workers=3,
     pin_memory=True,
     persistent_workers=False,

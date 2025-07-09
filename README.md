@@ -4,12 +4,22 @@ A PyTorch implementation of SwinUNETR V2 for medical image segmentation.
 
 ## Installation
 
-### On Kaggle
+### On Kaggle 
 
-Clone the repository and install the package locally:
+Clone the repository (Experimental Branch) and install the package locally:
 
 ```python
-!if [ -d "SwinUNETRV2" ]; then cd SwinUNETRV2 && git pull && cd ..; else git clone https://github.com/Yok4ai/SwinUNETRV2.git; fi
+!if [ -d "SwinUNETRV2" ]; then \
+    cd SwinUNETRV2 && \
+    git fetch origin && \
+    git checkout experimental && \
+    git pull origin experimental && \
+    cd ..; \
+else \
+    git clone --branch experimental https://github.com/Yok4ai/SwinUNETRV2.git; \
+fi
+
+# Install the package
 !pip install -q ./SwinUNETRV2
 ```
 
