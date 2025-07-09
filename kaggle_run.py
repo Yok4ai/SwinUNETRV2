@@ -29,8 +29,8 @@ print(f"Dataset prepared in: {output_dir}")
 args = argparse.Namespace(
     # Data parameters
     input_dir='/kaggle/working',
-    batch_size=2,  # Reduced for stability
-    num_workers=4,
+    batch_size=1,  # Reduced for stability
+    num_workers=2,
     pin_memory=True,
     persistent_workers=False,
     

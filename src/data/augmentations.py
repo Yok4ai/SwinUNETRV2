@@ -17,7 +17,7 @@ from monai.transforms import (
 )
 from data.convert_labels import ConvertLabels
 
-def get_transforms(img_size=128):
+def get_transforms(img_size):
     """Get training and validation transforms for BraTS data."""
     train_transforms = Compose(
         [
@@ -34,7 +34,7 @@ def get_transforms(img_size=128):
         ),
 
         # Spatial cropping
-        RandSpatialCropd(keys=["image", "label"], roi_size=[128, 128, 128], random_size=False),
+        RandSpatialCropd(keys=["image", "label"], roi_size=[img_size, img_size, img_size], random_size=False),
 
         # Geometric augmentations - proven to boost dice
         RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
