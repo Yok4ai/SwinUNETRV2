@@ -405,14 +405,15 @@ class BrainTumorSegmentation(pl.LightningModule):
                 self.best_metric_hausdorff = float('nan')
 
         # Print best metrics after every validation epoch
-        print("\n=== Best Validation Metrics So Far ===")
-        print(f"Best Mean Dice: {getattr(self, 'best_metric', float('nan')):.4f} at epoch {getattr(self, 'best_metric_epoch', 'N/A')}")
-        print(f"Best TC Dice: {getattr(self, 'best_metric_tc', float('nan')):.4f}")
-        print(f"Best WT Dice: {getattr(self, 'best_metric_wt', float('nan')):.4f}")
-        print(f"Best ET Dice: {getattr(self, 'best_metric_et', float('nan')):.4f}")
-        print(f"Best Mean IoU: {getattr(self, 'best_metric_iou', float('nan')):.4f}")
-        print(f"Best Hausdorff: {getattr(self, 'best_metric_hausdorff', float('nan')):.4f}")
-        print("======================================\n")
+        if hasattr(self.trainer, 'is_global_zero') and self.trainer.is_global_zero:
+            print("\n=== Best Validation Metrics So Far ===")
+            print(f"Best Mean Dice: {getattr(self, 'best_metric', float('nan')):.4f} at epoch {getattr(self, 'best_metric_epoch', 'N/A')}")
+            print(f"Best TC Dice: {getattr(self, 'best_metric_tc', float('nan')):.4f}")
+            print(f"Best WT Dice: {getattr(self, 'best_metric_wt', float('nan')):.4f}")
+            print(f"Best ET Dice: {getattr(self, 'best_metric_et', float('nan')):.4f}")
+            print(f"Best Mean IoU: {getattr(self, 'best_metric_iou', float('nan')):.4f}")
+            print(f"Best Hausdorff: {getattr(self, 'best_metric_hausdorff', float('nan')):.4f}")
+            print("======================================\n")
 
         # Reset metrics
         self.dice_metric.reset()
