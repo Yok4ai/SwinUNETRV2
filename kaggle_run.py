@@ -7,34 +7,43 @@ import argparse
 import torch
 import warnings
 
-# Set dataset here: 'brats2023' or 'brats2021'
-DATASET = "brats2023"  # Change to 'brats2021' to use BraTS 2021
+# CLI argument parsing for key parameters
+def parse_cli_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='brats2023', choices=['brats2021', 'brats2023'], help='Dataset to use')
+    parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
+    parser.add_argument('--batch_size', type=int, default=2, help='Batch size for training')
+    parser.add_argument('--num_workers', type=int, default=3, help='Number of data loader workers')
+    parser.add_argument('--img_size', type=int, default=96, help='Input image size')
+    parser.add_argument('--feature_size', type=int, default=48, help='Model feature size')
+    return parser.parse_args()
+
+cli_args = parse_cli_args()
 
 # Setup the environment and prepare data
-output_dir = setup_kaggle_notebook(DATASET)
+output_dir = setup_kaggle_notebook(cli_args.dataset)
 print(f"Dataset prepared in: {output_dir}")
-
 
 # Experimental Configuration
 args = argparse.Namespace(
     # Data parameters
     input_dir='/kaggle/working',
-    batch_size=2,
-    num_workers=3,
+    batch_size=cli_args.batch_size,
+    num_workers=cli_args.num_workers,
     pin_memory=True,
     persistent_workers=False,
-    dataset=DATASET,  # Use the selected dataset
+    dataset=cli_args.dataset,  # Use the selected dataset
     
     # Model parameters
-    img_size=96,
-    in_channels=3,
+    img_size=cli_args.img_size,
+    in_channels=4,
     out_channels=3,
-    feature_size=48,
+    feature_size=cli_args.feature_size,
 
     # Training parameters
     learning_rate=1e-4,  # More conservative
     weight_decay=1e-5,
-    epochs=100,
+    epochs=cli_args.epochs,
     accelerator='gpu',
     devices='auto',
     precision='16-mixed',
