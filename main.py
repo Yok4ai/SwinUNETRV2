@@ -65,6 +65,11 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--epochs", type=int, default=5, help="Number of epochs")
     parser.add_argument("--use_amp", action="store_true", help="Use automatic mixed precision")
+    parser.add_argument("--use_enhanced_model", action="store_true", help="Use Enhanced SwinUNETR with modality attention and MLP decoder")
+    parser.add_argument("--use_modality_attention", action="store_true", help="Enable modality attention module in enhanced model")
+    parser.add_argument("--use_mlp_decoder", action="store_true", help="Enable MLP decoder in enhanced model")
+    parser.add_argument("--mlp_hidden_ratio", type=int, default=4, help="MLP hidden ratio for enhanced model")
+    parser.add_argument("--dropout_rate", type=float, default=0.1, help="Dropout rate for enhanced model")
     
     # Parse arguments
     args = parser.parse_args()

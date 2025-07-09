@@ -59,6 +59,13 @@ args = argparse.Namespace(
     num_heads=(3, 6, 12, 24),
     downsample="mergingv2",
     
+    # Enhanced model options
+    use_enhanced_model=True,  # Enable enhanced model for experimentation
+    use_modality_attention=True,
+    use_mlp_decoder=True,
+    mlp_hidden_ratio=4,
+    dropout_rate=0.1,
+    
     # Validation settings
     val_interval=1,
     save_interval=1,
