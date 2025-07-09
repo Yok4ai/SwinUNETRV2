@@ -52,15 +52,14 @@ def prepare_brats_data(input_dir, output_dir):
     print(f"Created dataset.json at: {output_json_path}")
     return output_dir
 
-def setup_kaggle_notebook():
-    """Setup the Kaggle notebook environment and prepare data."""
-    # Prepare data
-    input_dir = '/kaggle/input/brats2023-part-1'
+def setup_kaggle_notebook(dataset="brats2023"):
+    """Setup the Kaggle notebook environment and prepare data for the specified dataset."""
+    if dataset == "brats2021":
+        input_dir = '/kaggle/input/brats21'
+    else:
+        input_dir = '/kaggle/input/brats2023-part-1'
     output_dir = '/kaggle/working'
-    
-    # Create dataset.json in the working directory
     prepare_brats_data(input_dir, output_dir)
-    
     return output_dir
 
 if __name__ == "__main__":
