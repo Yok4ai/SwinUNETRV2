@@ -285,7 +285,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         else:
             train_hausdorff = float('nan')
         self.log("train_hausdorff", train_hausdorff, prog_bar=True)
-        print(f"Train Hausdorff: {train_hausdorff}")
 
         # Log Train Dice 
         train_dice = self.dice_metric.aggregate().item()
@@ -350,6 +349,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
         self.jaccard_metric(y_pred=val_outputs, y=val_labels)
         self.hausdorff_metric(y_pred=val_outputs, y=val_labels)
+
         val_hausdorff_values = self.hausdorff_metric.aggregate(reduction='none')
         if not isinstance(val_hausdorff_values, torch.Tensor):
             val_hausdorff_values = torch.tensor(val_hausdorff_values)
@@ -359,7 +359,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         else:
             val_hausdorff = float('nan')
         self.log("val_hausdorff", val_hausdorff, prog_bar=True, on_epoch=True, sync_dist=True)
-        print(f"Val Hausdorff: {val_hausdorff}")
+
         # Compute and log mean precision, recall, F1
         precision, recall, f1 = self.compute_metrics(val_outputs, decollate_batch(val_labels))
         self.log("val_mean_precision", precision, prog_bar=True, on_epoch=True, sync_dist=True)
