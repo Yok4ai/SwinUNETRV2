@@ -18,7 +18,6 @@ import wandb
 from pytorch_lightning.loggers import WandbLogger
 from models.swinunetr import SwinUNETR
 import math
-import torchmetrics
 
 class ModalityAttentionModule(nn.Module):
     """
@@ -204,14 +203,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
         self.jaccard_metric = MeanIoU(include_background=True, reduction="mean", ignore_empty=True)
 
-        # TorchMetrics for Precision, Recall, F1 (per class and macro)
-        self.precision = torchmetrics.Precision(task="multiclass", num_classes=3, average=None)
-        self.recall = torchmetrics.Recall(task="multiclass", num_classes=3, average=None)
-        self.f1 = torchmetrics.F1Score(task="multiclass", num_classes=3, average=None)
-        self.precision_macro = torchmetrics.Precision(task="multiclass", num_classes=3, average="macro")
-        self.recall_macro = torchmetrics.Recall(task="multiclass", num_classes=3, average="macro")
-        self.f1_macro = torchmetrics.F1Score(task="multiclass", num_classes=3, average="macro")
-
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
         
         self.best_metric = -1
@@ -246,6 +237,25 @@ class BrainTumorSegmentation(pl.LightningModule):
         total_loss = 0.6 * dice_ce_loss + 0.4 * focal_loss
         return total_loss
 
+    def compute_metrics(self, preds, targets):
+        """Compute per-class precision, recall, and F1 for 3-class segmentation."""
+        # preds, targets: (B, C, D, H, W) or (B, C, ...)
+        eps = 1e-8
+        metrics = {"precision": [], "recall": [], "f1": []}
+        for c in range(preds.shape[1]):
+            pred_c = preds[:, c].float().reshape(-1)
+            target_c = targets[:, c].float().reshape(-1)
+            tp = (pred_c * target_c).sum()
+            fp = (pred_c * (1 - target_c)).sum()
+            fn = ((1 - pred_c) * target_c).sum()
+            precision = tp / (tp + fp + eps)
+            recall = tp / (tp + fn + eps)
+            f1 = 2 * precision * recall / (precision + recall + eps)
+            metrics["precision"].append(precision.item())
+            metrics["recall"].append(recall.item())
+            metrics["f1"].append(f1.item())
+        return metrics
+
     def training_step(self, batch, batch_idx):
         inputs, labels = batch["image"], batch["label"]
 
@@ -257,22 +267,15 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.log("train_loss", loss, prog_bar=True)
 
         # Apply sigmoid and threshold
-        outputs = [self.post_trans(i) for i in decollate_batch(outputs)]
-        labels_list = decollate_batch(labels)
-        # Compute Dice
-        self.dice_metric(y_pred=outputs, y=labels)
-        self.dice_metric_batch(y_pred=outputs, y=labels)
-        self.jaccard_metric(y_pred=outputs, y=labels)
+        outputs_bin = [self.post_trans(i) for i in decollate_batch(outputs)]
+        labels_bin = [self.post_trans(i) for i in decollate_batch(labels)]
+        outputs_bin = torch.stack(outputs_bin)
+        labels_bin = torch.stack(labels_bin)
 
-        # TorchMetrics: flatten and compute per-class
-        preds = torch.cat([o.argmax(dim=0, keepdim=True) for o in outputs], dim=0).long().flatten()
-        targets = torch.cat([l.argmax(dim=0, keepdim=True) for l in labels_list], dim=0).long().flatten()
-        self.precision.update(preds, targets)
-        self.recall.update(preds, targets)
-        self.f1.update(preds, targets)
-        self.precision_macro.update(preds, targets)
-        self.recall_macro.update(preds, targets)
-        self.f1_macro.update(preds, targets)
+        # Compute Dice
+        self.dice_metric(y_pred=outputs_bin, y=labels_bin)
+        self.dice_metric_batch(y_pred=outputs_bin, y=labels_bin)
+        self.jaccard_metric(y_pred=outputs_bin, y=labels_bin)
 
         # Log Train Dice 
         train_dice = self.dice_metric.aggregate().item()
@@ -292,33 +295,22 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.log("train_wt", metric_batch[1].item(), prog_bar=True)
         self.log("train_et", metric_batch[2].item(), prog_bar=True)
 
-        # Log precision, recall, f1 (per class and macro)
-        prec = self.precision.compute()
-        rec = self.recall.compute()
-        f1 = self.f1.compute()
-        self.log("train_precision_tc", prec[0], prog_bar=True)
-        self.log("train_precision_wt", prec[1], prog_bar=True)
-        self.log("train_precision_et", prec[2], prog_bar=True)
-        self.log("train_recall_tc", rec[0], prog_bar=True)
-        self.log("train_recall_wt", rec[1], prog_bar=True)
-        self.log("train_recall_et", rec[2], prog_bar=True)
-        self.log("train_f1_tc", f1[0], prog_bar=True)
-        self.log("train_f1_wt", f1[1], prog_bar=True)
-        self.log("train_f1_et", f1[2], prog_bar=True)
-        self.log("train_precision_macro", self.precision_macro.compute(), prog_bar=True)
-        self.log("train_recall_macro", self.recall_macro.compute(), prog_bar=True)
-        self.log("train_f1_macro", self.f1_macro.compute(), prog_bar=True)
+        # Precision/Recall/F1
+        metrics = self.compute_metrics(outputs_bin, labels_bin)
+        self.log("train_tc_precision", metrics["precision"][0], prog_bar=False)
+        self.log("train_wt_precision", metrics["precision"][1], prog_bar=False)
+        self.log("train_et_precision", metrics["precision"][2], prog_bar=False)
+        self.log("train_tc_recall", metrics["recall"][0], prog_bar=False)
+        self.log("train_wt_recall", metrics["recall"][1], prog_bar=False)
+        self.log("train_et_recall", metrics["recall"][2], prog_bar=False)
+        self.log("train_tc_f1", metrics["f1"][0], prog_bar=True)
+        self.log("train_wt_f1", metrics["f1"][1], prog_bar=True)
+        self.log("train_et_f1", metrics["f1"][2], prog_bar=True)
 
         # Reset metrics
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
         self.jaccard_metric.reset()
-        self.precision.reset()
-        self.recall.reset()
-        self.f1.reset()
-        self.precision_macro.reset()
-        self.recall_macro.reset()
-        self.f1_macro.reset()
 
         return loss
 
@@ -346,21 +338,15 @@ class BrainTumorSegmentation(pl.LightningModule):
         val_loss = self.compute_loss(val_outputs, val_labels)
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True, on_epoch=True)
         
-        val_outputs = [self.post_trans(i) for i in decollate_batch(val_outputs)]    
-        val_labels_list = decollate_batch(val_labels)
+        val_outputs_bin = [self.post_trans(i) for i in decollate_batch(val_outputs)]
+        val_labels_bin = [self.post_trans(i) for i in decollate_batch(val_labels)]
+        val_outputs_bin = torch.stack(val_outputs_bin)
+        val_labels_bin = torch.stack(val_labels_bin)
+
         # Compute Dice
-        self.dice_metric(y_pred=val_outputs, y=val_labels)
-        self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
-        self.jaccard_metric(y_pred=val_outputs, y=val_labels)
-        # TorchMetrics: flatten and compute per-class
-        preds = torch.cat([o.argmax(dim=0, keepdim=True) for o in val_outputs], dim=0).long().flatten()
-        targets = torch.cat([l.argmax(dim=0, keepdim=True) for l in val_labels_list], dim=0).long().flatten()
-        self.precision.update(preds, targets)
-        self.recall.update(preds, targets)
-        self.f1.update(preds, targets)
-        self.precision_macro.update(preds, targets)
-        self.recall_macro.update(preds, targets)
-        self.f1_macro.update(preds, targets)
+        self.dice_metric(y_pred=val_outputs_bin, y=val_labels_bin)
+        self.dice_metric_batch(y_pred=val_outputs_bin, y=val_labels_bin)
+        self.jaccard_metric(y_pred=val_outputs_bin, y=val_labels_bin)
         return {"val_loss": val_loss}
 
     def on_validation_epoch_end(self):
@@ -376,31 +362,19 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.metric_values_wt.append(metric_batch[1].item())
         self.metric_values_et.append(metric_batch[2].item())
 
-        # Log validation metrics
-        self.log("val_loss", val_loss, prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_mean_dice", val_dice, prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_mean_iou", val_iou, prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_tc", metric_batch[0].item(), prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_wt", metric_batch[1].item(), prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_et", metric_batch[2].item(), prog_bar=True, on_epoch=True, sync_dist=True)
+        # Precision/Recall/F1
+        metrics = self.compute_metrics(torch.stack(self.post_trans(i) for i in decollate_batch(val_outputs_bin)), torch.stack(val_labels_bin))
+        self.log("val_tc_precision", metrics["precision"][0], prog_bar=False, on_epoch=True)
+        self.log("val_wt_precision", metrics["precision"][1], prog_bar=False, on_epoch=True)
+        self.log("val_et_precision", metrics["precision"][2], prog_bar=False, on_epoch=True)
+        self.log("val_tc_recall", metrics["recall"][0], prog_bar=False, on_epoch=True)
+        self.log("val_wt_recall", metrics["recall"][1], prog_bar=False, on_epoch=True)
+        self.log("val_et_recall", metrics["recall"][2], prog_bar=False, on_epoch=True)
+        self.log("val_tc_f1", metrics["f1"][0], prog_bar=True, on_epoch=True)
+        self.log("val_wt_f1", metrics["f1"][1], prog_bar=True, on_epoch=True)
+        self.log("val_et_f1", metrics["f1"][2], prog_bar=True, on_epoch=True)
 
-        # Log precision, recall, f1 (per class and macro)
-        prec = self.precision.compute()
-        rec = self.recall.compute()
-        f1 = self.f1.compute()
-        self.log("val_precision_tc", prec[0], prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_precision_wt", prec[1], prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_precision_et", prec[2], prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_recall_tc", rec[0], prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_recall_wt", rec[1], prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_recall_et", rec[2], prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_f1_tc", f1[0], prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_f1_wt", f1[1], prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_f1_et", f1[2], prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_precision_macro", self.precision_macro.compute(), prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_recall_macro", self.recall_macro.compute(), prog_bar=True, on_epoch=True, sync_dist=True)
-        self.log("val_f1_macro", self.f1_macro.compute(), prog_bar=True, on_epoch=True, sync_dist=True)
-
+    
         if val_dice > self.best_metric:
             self.best_metric = val_dice
             self.best_metric_epoch = self.current_epoch
@@ -411,12 +385,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
         self.jaccard_metric.reset()
-        self.precision.reset()
-        self.recall.reset()
-        self.f1.reset()
-        self.precision_macro.reset()
-        self.recall_macro.reset()
-        self.f1_macro.reset()
 
     def on_train_end(self):
         print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}, "
