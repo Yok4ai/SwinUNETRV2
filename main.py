@@ -22,9 +22,6 @@ def main(args):
     Args:
         args: Argument namespace containing all configuration parameters
     """
-    # Set device
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
 
     # Step 1: Setup MONAI transforms
     print("Step 1: Setting up MONAI transforms...")
@@ -67,7 +64,6 @@ if __name__ == "__main__":
     parser.add_argument("--img_size", type=int, default=64, help="Input image size")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--epochs", type=int, default=5, help="Number of epochs")
-    parser.add_argument("--device", type=str, default="cuda", help="Device to use (cuda/cpu)")
     parser.add_argument("--use_amp", action="store_true", help="Use automatic mixed precision")
     
     # Parse arguments
