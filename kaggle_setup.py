@@ -21,11 +21,11 @@ def prepare_brats_data(input_dir, output_dir, dataset="brats2023"):
         case_dirs.sort()
         for case_dir in case_dirs:
             case_id = os.path.basename(case_dir)
-            t1c = os.path.join(case_dir, f"{case_id}-t1c.nii")
-            t1n = os.path.join(case_dir, f"{case_id}-t1n.nii")
-            t2f = os.path.join(case_dir, f"{case_id}-t2f.nii")
-            t2w = os.path.join(case_dir, f"{case_id}-t2w.nii")
-            label = os.path.join(case_dir, f"{case_id}-seg.nii")
+            t1c = os.path.join(case_dir, f"{case_id}_t1c.nii")
+            t1n = os.path.join(case_dir, f"{case_id}_t1n.nii")
+            t2f = os.path.join(case_dir, f"{case_id}_t2f.nii")
+            t2w = os.path.join(case_dir, f"{case_id}_t2w.nii")
+            label = os.path.join(case_dir, f"{case_id}_seg.nii")
             file_list.append({
                 "image": [t1c, t1n, t2f, t2w],
                 "label": label
