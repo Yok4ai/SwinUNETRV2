@@ -388,13 +388,32 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.log("val_wt", metric_batch[1].item(), prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_et", metric_batch[2].item(), prog_bar=True, on_epoch=True, sync_dist=True)
 
-    
         if val_dice > self.best_metric:
             self.best_metric = val_dice
             self.best_metric_epoch = self.current_epoch
             torch.save(self.model.state_dict(), "best_metric_model_swinunetr_v2.pth")
             self.log("best_metric", self.best_metric, sync_dist=True, on_epoch=True)
-    
+            # Save best metrics for printing
+            self.best_metric_tc = metric_batch[0].item()
+            self.best_metric_wt = metric_batch[1].item()
+            self.best_metric_et = metric_batch[2].item()
+            self.best_metric_iou = val_iou
+            # Try to get best Hausdorff from logs if available
+            try:
+                self.best_metric_hausdorff = self.trainer.logged_metrics["val_hausdorff"].item()
+            except Exception:
+                self.best_metric_hausdorff = float('nan')
+
+        # Print best metrics after every validation epoch
+        print("\n=== Best Validation Metrics So Far ===")
+        print(f"Best Mean Dice: {getattr(self, 'best_metric', float('nan')):.4f} at epoch {getattr(self, 'best_metric_epoch', 'N/A')}")
+        print(f"Best TC Dice: {getattr(self, 'best_metric_tc', float('nan')):.4f}")
+        print(f"Best WT Dice: {getattr(self, 'best_metric_wt', float('nan')):.4f}")
+        print(f"Best ET Dice: {getattr(self, 'best_metric_et', float('nan')):.4f}")
+        print(f"Best Mean IoU: {getattr(self, 'best_metric_iou', float('nan')):.4f}")
+        print(f"Best Hausdorff: {getattr(self, 'best_metric_hausdorff', float('nan')):.4f}")
+        print("======================================\n")
+
         # Reset metrics
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
