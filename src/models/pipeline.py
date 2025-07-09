@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from monai.losses import DiceLoss, DiceCELoss, FocalLoss
-from monai.metrics import DiceMetric, MeanIoU
+from monai.metrics import DiceMetric, MeanIoU, HausdorffDistanceMetric
 from monai.transforms import Compose, Activations, AsDiscrete
 from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset
 from monai.inferers import sliding_window_inference
@@ -202,6 +202,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric = DiceMetric(include_background=True, reduction="mean")
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
         self.jaccard_metric = MeanIoU(include_background=True, reduction="mean", ignore_empty=True)
+        self.hausdorff_metric = HausdorffDistanceMetric(include_background=False, reduction="mean")
 
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
         
@@ -273,12 +274,16 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric(y_pred=outputs, y=labels)
         self.dice_metric_batch(y_pred=outputs, y=labels)
         self.jaccard_metric(y_pred=outputs, y=labels)
+        # Compute Hausdorff
+        self.hausdorff_metric(y_pred=outputs, y=labels)
 
         # Log Train Dice 
         train_dice = self.dice_metric.aggregate().item()
         train_iou = self.jaccard_metric.aggregate().item()
+        train_hausdorff = self.hausdorff_metric.aggregate().item()
         self.log("train_mean_dice", train_dice, prog_bar=True)
         self.log("train_mean_iou", train_iou, prog_bar=True)
+        self.log("train_hausdorff", train_hausdorff, prog_bar=True)
 
         # Compute and log mean precision, recall, F1
         precision, recall, f1 = self.compute_metrics(outputs, decollate_batch(labels))
@@ -302,6 +307,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
         self.jaccard_metric.reset()
+        self.hausdorff_metric.reset()
 
         return loss
 
@@ -335,11 +341,14 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric(y_pred=val_outputs, y=val_labels)
         self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
         self.jaccard_metric(y_pred=val_outputs, y=val_labels)
+        self.hausdorff_metric(y_pred=val_outputs, y=val_labels)
         # Compute and log mean precision, recall, F1
         precision, recall, f1 = self.compute_metrics(val_outputs, decollate_batch(val_labels))
         self.log("val_mean_precision", precision, prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_mean_recall", recall, prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_mean_f1", f1, prog_bar=True, on_epoch=True, sync_dist=True)
+        val_hausdorff = self.hausdorff_metric.aggregate().item()
+        self.log("val_hausdorff", val_hausdorff, prog_bar=True, on_epoch=True, sync_dist=True)
         return {"val_loss": val_loss}
 
     def on_validation_epoch_end(self):
@@ -374,6 +383,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric.reset()
         self.dice_metric_batch.reset()
         self.jaccard_metric.reset()
+        self.hausdorff_metric.reset()
 
     def on_train_end(self):
         print(f"Train completed, best_metric: {self.best_metric:.4f} at epoch: {self.best_metric_epoch}, "
