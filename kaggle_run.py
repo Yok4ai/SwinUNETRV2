@@ -7,16 +7,23 @@ import argparse
 import torch
 import warnings
 
-
-
-# Get dataset selection from environment variable or default
-DATASET = os.environ.get("BRATS_DATASET", "brats2021")
+def optimize_gpu_usage():
+    """Optimize GPU memory usage and performance"""
+    if torch.cuda.is_available():
+        # Enable TF32 for better performance on Ampere GPUs
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        # Enable cudnn benchmarking for better performance
+        torch.backends.cudnn.benchmark = True
+        
+        print("✅ GPU optimizations applied")
 
 # Setup the environment and prepare data
-output_dir = setup_kaggle_notebook(DATASET)
+output_dir = setup_kaggle_notebook()
 print(f"Dataset prepared in: {output_dir}")
 
-
+# Apply enhanced GPU optimizations
+# optimize_gpu_usage()
 
 # Experimental Configuration
 args = argparse.Namespace(
@@ -26,7 +33,7 @@ args = argparse.Namespace(
     num_workers=3,
     pin_memory=True,
     persistent_workers=False,
-    dataset=DATASET,  # Use selected dataset
+    dataset="brats2023",  # Added dataset option
     
     # Model parameters
     img_size=96,
