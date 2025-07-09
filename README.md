@@ -132,8 +132,8 @@ python -m swinunetrv2.main \
 You can also import and use individual components:
 
 ```python
-from swinunetrv2.models.swinunetr import SwinUNETR
-from swinunetrv2.models.trainer import Trainer
+from src.models.swinunetr import SwinUNETR
+from src.models.trainer import Trainer
 
 # Initialize model
 model = SwinUNETR(...)
