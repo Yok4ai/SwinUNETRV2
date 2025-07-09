@@ -276,14 +276,22 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.jaccard_metric(y_pred=outputs, y=labels)
         # Compute Hausdorff
         self.hausdorff_metric(y_pred=outputs, y=labels)
+        hausdorff_values = self.hausdorff_metric.aggregate(reduction='none')
+        if not isinstance(hausdorff_values, torch.Tensor):
+            hausdorff_values = torch.tensor(hausdorff_values)
+        valid = torch.isfinite(hausdorff_values)
+        if valid.any():
+            train_hausdorff = hausdorff_values[valid].mean().item()
+        else:
+            train_hausdorff = float('nan')
+        self.log("train_hausdorff", train_hausdorff, prog_bar=True)
+        print(f"Train Hausdorff: {train_hausdorff}")
 
         # Log Train Dice 
         train_dice = self.dice_metric.aggregate().item()
         train_iou = self.jaccard_metric.aggregate().item()
-        train_hausdorff = self.hausdorff_metric.aggregate().item()
         self.log("train_mean_dice", train_dice, prog_bar=True)
         self.log("train_mean_iou", train_iou, prog_bar=True)
-        self.log("train_hausdorff", train_hausdorff, prog_bar=True)
 
         # Compute and log mean precision, recall, F1
         precision, recall, f1 = self.compute_metrics(outputs, decollate_batch(labels))
@@ -342,13 +350,21 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
         self.jaccard_metric(y_pred=val_outputs, y=val_labels)
         self.hausdorff_metric(y_pred=val_outputs, y=val_labels)
+        val_hausdorff_values = self.hausdorff_metric.aggregate(reduction='none')
+        if not isinstance(val_hausdorff_values, torch.Tensor):
+            val_hausdorff_values = torch.tensor(val_hausdorff_values)
+        val_valid = torch.isfinite(val_hausdorff_values)
+        if val_valid.any():
+            val_hausdorff = val_hausdorff_values[val_valid].mean().item()
+        else:
+            val_hausdorff = float('nan')
+        self.log("val_hausdorff", val_hausdorff, prog_bar=True, on_epoch=True, sync_dist=True)
+        print(f"Val Hausdorff: {val_hausdorff}")
         # Compute and log mean precision, recall, F1
         precision, recall, f1 = self.compute_metrics(val_outputs, decollate_batch(val_labels))
         self.log("val_mean_precision", precision, prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_mean_recall", recall, prog_bar=True, on_epoch=True, sync_dist=True)
         self.log("val_mean_f1", f1, prog_bar=True, on_epoch=True, sync_dist=True)
-        val_hausdorff = self.hausdorff_metric.aggregate().item()
-        self.log("val_hausdorff", val_hausdorff, prog_bar=True, on_epoch=True, sync_dist=True)
         return {"val_loss": val_loss}
 
     def on_validation_epoch_end(self):
