@@ -43,6 +43,7 @@ args = argparse.Namespace(
     # Training parameters
     learning_rate=1e-4,  # More conservative
     weight_decay=1e-5,
+    warmup_epochs=30,
     epochs=cli_args.epochs,
     accelerator='gpu',
     devices='auto',

@@ -52,6 +52,8 @@ def setup_training(train_loader, val_loader, args):
         max_epochs=args.epochs,
         val_interval=args.val_interval,
         learning_rate=args.learning_rate,
+        warmup_epochs=args.warmup_epochs,
+        weight_decay=args.weight_decay,
         roi_size=args.roi_size,
         sw_batch_size=args.sw_batch_size,
         use_v2=args.use_v2,
