@@ -42,19 +42,6 @@ def get_transforms(img_size, dataset="brats2023"):
         RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
         RandRotate90d(keys=["image", "label"], prob=0.3, spatial_axes=(0, 1)),
 
-
-        # Affine transformations
-        RandAffined(
-            keys=["image", "label"],
-            mode=("bilinear", "nearest"),
-            prob=0.4,
-            shear_range=(0.5, 0.5, 0.5),
-            padding_mode="zeros",
-            # rotate_range=(0.1, 0.1, 0.1),  # Reduced rotation
-            # scale_range=(0.05, 0.05, 0.05),  # Reduced scaling
-            # translate_range=(5, 5, 5),  # Small translations
-        ),
-
         # Intensity augmentations
         NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
         RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),

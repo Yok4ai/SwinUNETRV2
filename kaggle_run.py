@@ -62,9 +62,7 @@ args = argparse.Namespace(
     # Enhanced model options
     use_enhanced_model=True,  # Enable enhanced model for experimentation
     use_modality_attention=True,
-    use_mlp_decoder=True,
-    mlp_hidden_ratio=4,
-    dropout_rate=0.1,
+    use_class_weights=True,
     
     # Validation settings
     val_interval=1,
@@ -86,6 +84,7 @@ print(f"⚡ Learning rate: {args.learning_rate}")
 print(f"🔄 SW batch size: {args.sw_batch_size}")
 print(f"📊 Total epochs: {args.epochs}")
 print(f"🗂️ Dataset: {args.dataset}")
+print(f"🏋️ Use class weights: {args.use_class_weights}")
 
 def run_with_error_handling():
     """Run training with comprehensive error handling"""

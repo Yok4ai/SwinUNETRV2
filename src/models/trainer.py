@@ -11,12 +11,10 @@ from src.models.pipeline import BrainTumorSegmentation
 def setup_training(train_loader, val_loader, args):
     """
     Setup training with direct parameter passing from args
-    
     Args:
         train_loader: Training DataLoader
         val_loader: Validation DataLoader
-        args: Argument namespace containing all configuration parameters
-    
+        args: Argument namespace containing all configuration parameters (use_class_weights should be set in the namespace)
     Returns:
         model: BrainTumorSegmentation model
         trainer: PyTorch Lightning trainer
@@ -62,9 +60,7 @@ def setup_training(train_loader, val_loader, args):
         downsample=args.downsample,
         use_enhanced_model=getattr(args, 'use_enhanced_model', False),
         use_modality_attention=getattr(args, 'use_modality_attention', True),
-        use_mlp_decoder=getattr(args, 'use_mlp_decoder', True),
-        mlp_hidden_ratio=getattr(args, 'mlp_hidden_ratio', 4),
-        dropout_rate=getattr(args, 'dropout_rate', 0.1),
+        use_class_weights=getattr(args, 'use_class_weights', True),
     )
 
     # Setup trainer

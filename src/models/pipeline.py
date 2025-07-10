@@ -16,7 +16,7 @@ from pytorch_lightning.callbacks.timer import Timer
 from torch.cuda.amp import GradScaler
 import wandb
 from pytorch_lightning.loggers import WandbLogger
-from models.swinunetr import SwinUNETR
+from .swinunetr import SwinUNETR
 import math
 
 class ModalityAttentionModule(nn.Module):
@@ -57,44 +57,15 @@ class ModalityAttentionModule(nn.Module):
         x_refined = x_channel * spatial_attention
         return x_refined + x  # Residual connection
 
-class MLPDecoder(nn.Module):
-    """
-    MLP Decoder module to reduce over-parameterization in the decoder.
-    """
-    def __init__(self, in_channels: int, hidden_channels: int, out_channels: int, dropout_rate: float = 0.1):
-        super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(in_channels, hidden_channels),
-            nn.LayerNorm(hidden_channels),
-            nn.GELU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_channels, hidden_channels // 2),
-            nn.LayerNorm(hidden_channels // 2),
-            nn.GELU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_channels // 2, out_channels)
-        )
-    def forward(self, x):
-        b, c, d, h, w = x.shape
-        x = x.permute(0, 2, 3, 4, 1).contiguous()  # (B, D, H, W, C)
-        x = x.view(-1, c)  # (B*D*H*W, C)
-        x = self.mlp(x)
-        x = x.view(b, d, h, w, -1)
-        x = x.permute(0, 4, 1, 2, 3).contiguous()  # (B, C, D, H, W)
-        return x
-
 class EnhancedSwinUNETR(nn.Module):
     """
-    Enhanced SwinUNETR with Modality Attention and MLP Decoder.
+    Enhanced SwinUNETR with Modality Attention only (no MLP Decoder).
     """
     def __init__(self, 
                  in_channels: int = 4,
                  out_channels: int = 3,
                  feature_size: int = 48,
                  use_modality_attention: bool = True,
-                 use_mlp_decoder: bool = True,
-                 mlp_hidden_ratio: int = 4,
-                 dropout_rate: float = 0.1,
                  **kwargs):
         super().__init__()
         self.use_modality_attention = use_modality_attention
@@ -102,7 +73,7 @@ class EnhancedSwinUNETR(nn.Module):
             self.modality_attention = ModalityAttentionModule(in_channels)
         self.swin_unetr = SwinUNETR(
             in_channels=in_channels,
-            out_channels=out_channels if not use_mlp_decoder else feature_size,
+            out_channels=out_channels,
             feature_size=feature_size,
             use_checkpoint=True,
             use_v2=True,
@@ -115,21 +86,10 @@ class EnhancedSwinUNETR(nn.Module):
             dropout_path_rate=0.0,
             downsample="mergingv2"
         )
-        self.use_mlp_decoder = use_mlp_decoder
-        if use_mlp_decoder:
-            mlp_hidden = feature_size * mlp_hidden_ratio
-            self.mlp_decoder = MLPDecoder(
-                in_channels=feature_size,
-                hidden_channels=mlp_hidden,
-                out_channels=out_channels,
-                dropout_rate=dropout_rate
-            )
     def forward(self, x):
         if self.use_modality_attention:
             x = self.modality_attention(x)
         x = self.swin_unetr(x)
-        if self.use_mlp_decoder:
-            x = self.mlp_decoder(x)
         return x
 
 class BrainTumorSegmentation(pl.LightningModule):
@@ -141,9 +101,6 @@ class BrainTumorSegmentation(pl.LightningModule):
                  use_class_weights=True,
                  use_enhanced_model=False,  # NEW ARGUMENT
                  use_modality_attention=True,  # For EnhancedSwinUNETR
-                 use_mlp_decoder=True,        # For EnhancedSwinUNETR
-                 mlp_hidden_ratio=4,          # For EnhancedSwinUNETR
-                 dropout_rate=0.1,            # For EnhancedSwinUNETR
                  ):
         
         super().__init__()
@@ -155,10 +112,7 @@ class BrainTumorSegmentation(pl.LightningModule):
                 in_channels=4,
                 out_channels=3,
                 feature_size=self.hparams.feature_size,
-                use_modality_attention=self.hparams.use_modality_attention,
-                use_mlp_decoder=self.hparams.use_mlp_decoder,
-                mlp_hidden_ratio=self.hparams.mlp_hidden_ratio,
-                dropout_rate=self.hparams.dropout_rate
+                use_modality_attention=self.hparams.use_modality_attention
             )
         else:
             self.model = SwinUNETR(
