@@ -16,6 +16,7 @@ def parse_cli_args():
     parser.add_argument('--num_workers', type=int, default=3, help='Number of data loader workers')
     parser.add_argument('--img_size', type=int, default=96, help='Input image size')
     parser.add_argument('--feature_size', type=int, default=48, help='Model feature size')
+    parser.add_argument('--loss_type', type=str, default='hybrid', choices=['hybrid', 'dice'], help='Loss function: hybrid (DiceCE+Focal) or dice (Dice only)')
     return parser.parse_args()
 
 cli_args = parse_cli_args()
@@ -75,6 +76,7 @@ args = argparse.Namespace(
     roi_size=[96, 96, 96],  # Reduced ROI size
     sw_batch_size=1,
     overlap=0.25,
+    loss_type=cli_args.loss_type,
 )
 
 # Print final configuration summary
@@ -82,6 +84,7 @@ print("\n=== 🚀 OPTIMIZED SWINUNETR CONFIGURATION ===")
 print(f"🎯 Batch size: {args.batch_size}")
 print(f"📐 Image size: {args.img_size}")
 print(f"⚡ Learning rate: {args.learning_rate}")
+print(f"🧮 Loss type: {args.loss_type}")
 print(f"🔄 SW batch size: {args.sw_batch_size}")
 print(f"📊 Total epochs: {args.epochs}")
 print(f"🗂️ Dataset: {args.dataset}")

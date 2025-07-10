@@ -63,6 +63,7 @@ def setup_training(train_loader, val_loader, args):
         use_enhanced_model=getattr(args, 'use_enhanced_model', False),
         use_modality_attention=getattr(args, 'use_modality_attention', True),
         use_class_weights=getattr(args, 'use_class_weights', True),
+        loss_type=getattr(args, 'loss_type', 'hybrid'),
     )
 
     # Setup trainer

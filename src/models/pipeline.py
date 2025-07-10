@@ -16,8 +16,10 @@ from pytorch_lightning.callbacks.timer import Timer
 from torch.cuda.amp import GradScaler
 import wandb
 from pytorch_lightning.loggers import WandbLogger
-from .swinunetr import SwinUNETR
 import math
+# from .swinunetr import SwinUNETR
+from monai.networks.nets import SwinUNETR
+
 
 class ModalityAttentionModule(nn.Module):
     """
@@ -101,6 +103,7 @@ class BrainTumorSegmentation(pl.LightningModule):
                  use_class_weights=True,
                  use_enhanced_model=False,  # NEW ARGUMENT
                  use_modality_attention=True,  # For EnhancedSwinUNETR
+                 loss_type='hybrid',
                  ):
         
         super().__init__()
@@ -140,6 +143,7 @@ class BrainTumorSegmentation(pl.LightningModule):
             class_weights = None
             
         # Loss functions with class weighting
+        self.loss_type = loss_type
         self.dice_loss = DiceLoss(
             smooth_nr=0, smooth_dr=1e-5, squared_pred=True, 
             to_onehot_y=False, sigmoid=True
@@ -184,13 +188,14 @@ class BrainTumorSegmentation(pl.LightningModule):
         return self.model(x)
 
     def compute_loss(self, outputs, labels):
-        """Combine DiceCE with class-weighted Focal for imbalanced classes"""
-        dice_ce_loss = self.ce_loss(outputs, labels)
-        focal_loss = self.focal_loss(outputs, labels)
-        
-        # Balanced weighting with more emphasis on focal for imbalance
-        total_loss = 0.6 * dice_ce_loss + 0.4 * focal_loss
-        return total_loss
+        """Compute loss based on loss_type: 'hybrid' (DiceCE+Focal) or 'dice' (Dice only)"""
+        if self.loss_type == 'hybrid':
+            dice_ce_loss = self.ce_loss(outputs, labels)
+            focal_loss = self.focal_loss(outputs, labels)
+            total_loss = 0.6 * dice_ce_loss + 0.4 * focal_loss
+            return total_loss
+        else:
+            return self.dice_loss(outputs, labels)
 
     def compute_metrics(self, outputs, labels):
         """Compute mean precision, recall, and F1 score for the batch."""
