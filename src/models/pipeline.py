@@ -63,6 +63,7 @@ class BrainTumorSegmentation(pl.LightningModule):
             
         # Loss functions with class weighting
         self.loss_type = loss_type
+
         self.dice_loss = DiceLoss(
             smooth_nr=0, smooth_dr=1e-5, squared_pred=True, 
             to_onehot_y=False, sigmoid=True
@@ -213,7 +214,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Original prediction
         val_outputs = sliding_window_inference(
             val_inputs, roi_size=roi_size, sw_batch_size=1, 
-            predictor=self.model, overlap=0.6  # Higher overlap
+            predictor=self.model, overlap=0.5  # Higher overlap
         )
         
         # Compute loss with hybrid approach
