@@ -17,6 +17,8 @@ def parse_cli_args():
     parser.add_argument('--img_size', type=int, default=96, help='Input image size')
     parser.add_argument('--feature_size', type=int, default=48, help='Model feature size')
     parser.add_argument('--loss_type', type=str, default='hybrid', choices=['hybrid', 'dice'], help='Loss function: hybrid (DiceCE+Focal) or dice (Dice only)')
+    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for optimizer')
+    parser.add_argument('--warmup_epochs', type=int, default=30, help='Number of warmup epochs for LR scheduler')
     return parser.parse_args()
 
 cli_args = parse_cli_args()
@@ -42,9 +44,9 @@ args = argparse.Namespace(
     feature_size=cli_args.feature_size,
 
     # Training parameters
-    learning_rate=1e-4,  # More conservative
+    learning_rate=cli_args.learning_rate,  # Now from CLI
     weight_decay=1e-5,
-    warmup_epochs=30,
+    warmup_epochs=cli_args.warmup_epochs,
     epochs=cli_args.epochs,
     accelerator='gpu',
     devices='auto',
@@ -82,6 +84,7 @@ print("\n=== 🚀 OPTIMIZED SWINUNETR CONFIGURATION ===")
 print(f"🎯 Batch size: {args.batch_size}")
 print(f"📐 Image size: {args.img_size}")
 print(f"⚡ Learning rate: {args.learning_rate}")
+print(f"🔥 Warmup epochs: {args.warmup_epochs}")
 print(f"🧮 Loss type: {args.loss_type}")
 print(f"🔄 SW batch size: {args.sw_batch_size}")
 print(f"📊 Total epochs: {args.epochs}")
