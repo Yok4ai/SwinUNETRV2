@@ -21,8 +21,6 @@ import math
 from monai.networks.nets import SwinUNETR
 
 
-# Remove ModalityAttentionModule and EnhancedSwinUNETR classes
-
 class ModalityAttentionModule(nn.Module):
     """
     Modality Attention Module for better feature extraction across different MRI modalities.
