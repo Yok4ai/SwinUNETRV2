@@ -76,7 +76,7 @@ args = argparse.Namespace(
     # Inference parameters
     roi_size=[96, 96, 96],  # Reduced ROI size
     sw_batch_size=1,
-    overlap=0.25,
+    overlap=0.5,
     loss_type=cli_args.loss_type,
 )
 
