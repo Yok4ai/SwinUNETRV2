@@ -20,9 +20,28 @@ def parse_cli_args():
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for optimizer')
     parser.add_argument('--warmup_epochs', type=int, default=30, help='Number of warmup epochs for LR scheduler')
     parser.add_argument('--use_class_weights', action='store_true', help='Use class weights for loss (default: False)')
+    parser.add_argument('--use_modality_attention', action='store_true', help='Enable Modality Attention module (default: False)')
     return parser.parse_args()
 
 cli_args = parse_cli_args()
+
+"""
+# Example usage:
+!python kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 100 \
+  --batch_size 2 \
+  --num_workers 3 \
+  --img_size 96 \
+  --feature_size 48 \
+  --loss_type dice \
+  --learning_rate 1e-4 \
+  --warmup_epochs 30 \
+  --use_class_weights \
+  --use_modality_attention
+#
+# Omit --use_class_weights and --use_modality_attention to disable them (they are store_true flags)
+"""
 
 # Setup the environment and prepare data
 output_dir = setup_kaggle_notebook(cli_args.dataset)
@@ -66,6 +85,7 @@ args = argparse.Namespace(
     
     # Enhanced model options
     use_class_weights=cli_args.use_class_weights,
+    use_modality_attention=cli_args.use_modality_attention,
     
     # Validation settings
     val_interval=1,
@@ -91,6 +111,7 @@ print(f"🔄 SW batch size: {args.sw_batch_size}")
 print(f"📊 Total epochs: {args.epochs}")
 print(f"🗂️ Dataset: {args.dataset}")
 print(f"🏋️ Use class weights: {args.use_class_weights}")
+print(f"🧠 Use modality attention: {args.use_modality_attention}")
 
 def run_with_error_handling():
     """Run training with comprehensive error handling"""
