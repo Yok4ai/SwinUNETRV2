@@ -25,7 +25,7 @@ def main(args):
 
     # Step 1: Setup MONAI transforms
     print("Step 1: Setting up MONAI transforms...")
-    train_transforms, val_transforms = get_transforms(img_size=args.img_size)
+    train_transforms, val_transforms = get_transforms(img_size=args.img_size, dataset=args.dataset)
     
     # Step 2: Create dataloaders
     print("Step 2: Creating dataloaders...")
@@ -52,22 +52,3 @@ def main(args):
     # Step 4: Train model
     print("Step 4: Starting training...")
     train_model(model, trainer, train_loader, val_loader)
-
-if __name__ == "__main__":
-    # Create argument parser
-    parser = argparse.ArgumentParser(description="Train SwinUNETR-V2 for brain tumor segmentation")
-    
-    # Add arguments
-    parser.add_argument("--input_dir", type=str, required=True, help="Input data directory")
-    parser.add_argument("--batch_size", type=int, default=2, help="Batch size for training")
-    parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for data loading")
-    parser.add_argument("--img_size", type=int, default=64, help="Input image size")
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--epochs", type=int, default=5, help="Number of epochs")
-    parser.add_argument("--use_amp", action="store_true", help="Use automatic mixed precision")
-    
-    # Parse arguments
-    args = parser.parse_args()
-    
-    # Run main function
-    main(args)
