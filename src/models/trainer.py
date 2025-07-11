@@ -42,7 +42,7 @@ def setup_training(train_loader, val_loader, args):
     wandb_logger = WandbLogger(
         project="brain-tumor-segmentation",
         name="swinunetr-v2-experimental",
-        log_model=True
+        log_model=False
     )
 
     # Initialize model

@@ -222,7 +222,24 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True, on_epoch=True)
         
         val_outputs = [self.post_trans(i) for i in decollate_batch(val_outputs)]    
-        
+
+        # Log images to wandb (only for the first batch of each epoch)
+        if batch_idx == 0 and self.logger is not None and hasattr(self.logger, "experiment"):
+            # Take the first image in the batch
+            img = val_inputs[0, 0].detach().cpu().numpy()  # First channel, first image
+            pred = val_outputs[0][0].detach().cpu().numpy()
+            label = val_labels[0, 0].detach().cpu().numpy()
+            # Normalize for visualization
+            img = (img - img.min()) / (img.max() - img.min() + 1e-8)
+            # Pick a middle slice for 3D volumes
+            slice_idx = img.shape[-1] // 2
+            self.logger.experiment.log({
+                "val_image": wandb.Image(img[..., slice_idx], caption="Input"),
+                "val_pred": wandb.Image(pred[..., slice_idx], caption="Prediction"),
+                "val_label": wandb.Image(label[..., slice_idx], caption="Label"),
+                "global_step": self.global_step
+            })
+
         # Compute Dice
         self.dice_metric(y_pred=val_outputs, y=val_labels)
         self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
