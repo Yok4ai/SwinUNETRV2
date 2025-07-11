@@ -62,9 +62,7 @@ args = argparse.Namespace(
     downsample="mergingv2",
     
     # Enhanced model options
-    use_enhanced_model=True,  # Enable enhanced model for experimentation
-    use_modality_attention=True,
-    use_class_weights=True,
+    use_class_weights=False,
     
     # Validation settings
     val_interval=1,

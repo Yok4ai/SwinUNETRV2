@@ -21,78 +21,7 @@ import math
 from monai.networks.nets import SwinUNETR
 
 
-class ModalityAttentionModule(nn.Module):
-    """
-    Modality Attention Module for better feature extraction across different MRI modalities.
-    Learns importance weights for each modality channel.
-    """
-    def __init__(self, in_channels: int = 4, reduction_ratio: int = 2):
-        super().__init__()
-        self.in_channels = in_channels
-        # Channel attention components
-        self.global_avg_pool = nn.AdaptiveAvgPool3d(1)
-        self.global_max_pool = nn.AdaptiveMaxPool3d(1)
-        # Shared MLP
-        hidden_channels = max(1, in_channels // reduction_ratio)
-        self.channel_mlp = nn.Sequential(
-            nn.Linear(in_channels, hidden_channels),
-            nn.ReLU(inplace=True),
-            nn.Linear(hidden_channels, in_channels)
-        )
-        # Spatial attention components
-        self.spatial_conv = nn.Conv3d(2, 1, kernel_size=7, padding=3, bias=False)
-        self.sigmoid = nn.Sigmoid()
-    def forward(self, x):
-        batch_size, channels, d, h, w = x.size()
-        # Channel attention
-        avg_pool = self.global_avg_pool(x).view(batch_size, channels)
-        max_pool = self.global_max_pool(x).view(batch_size, channels)
-        avg_out = self.channel_mlp(avg_pool)
-        max_out = self.channel_mlp(max_pool)
-        channel_attention = self.sigmoid(avg_out + max_out).view(batch_size, channels, 1, 1, 1)
-        x_channel = x * channel_attention
-        # Spatial attention
-        avg_spatial = torch.mean(x_channel, dim=1, keepdim=True)
-        max_spatial, _ = torch.max(x_channel, dim=1, keepdim=True)
-        spatial_concat = torch.cat([avg_spatial, max_spatial], dim=1)
-        spatial_attention = self.sigmoid(self.spatial_conv(spatial_concat))
-        x_refined = x_channel * spatial_attention
-        return x_refined + x  # Residual connection
-
-class EnhancedSwinUNETR(nn.Module):
-    """
-    Enhanced SwinUNETR with Modality Attention only (no MLP Decoder).
-    """
-    def __init__(self, 
-                 in_channels: int = 4,
-                 out_channels: int = 3,
-                 feature_size: int = 48,
-                 use_modality_attention: bool = True,
-                 **kwargs):
-        super().__init__()
-        self.use_modality_attention = use_modality_attention
-        if use_modality_attention:
-            self.modality_attention = ModalityAttentionModule(in_channels)
-        self.swin_unetr = SwinUNETR(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            feature_size=feature_size,
-            use_checkpoint=True,
-            use_v2=True,
-            spatial_dims=3,
-            depths=(2, 2, 2, 2),
-            num_heads=(3, 6, 12, 24),
-            norm_name="instance",
-            drop_rate=0.0,
-            attn_drop_rate=0.0,
-            dropout_path_rate=0.0,
-            downsample="mergingv2"
-        )
-    def forward(self, x):
-        if self.use_modality_attention:
-            x = self.modality_attention(x)
-        x = self.swin_unetr(x)
-        return x
+# Remove ModalityAttentionModule and EnhancedSwinUNETR classes
 
 class BrainTumorSegmentation(pl.LightningModule):
     def __init__(self, train_loader, val_loader, max_epochs=100,
@@ -101,39 +30,29 @@ class BrainTumorSegmentation(pl.LightningModule):
                  sw_batch_size=2, use_v2=True, depths=(2, 2, 2, 2),
                  num_heads=(3, 6, 12, 24), downsample="mergingv2",
                  use_class_weights=True,
-                 use_enhanced_model=False,  # NEW ARGUMENT
-                 use_modality_attention=True,  # For EnhancedSwinUNETR
                  loss_type='hybrid',
                  ):
         
         super().__init__()
         self.save_hyperparameters()
         
-        # Base SwinUNETR model
-        if self.hparams.use_enhanced_model:
-            self.model = EnhancedSwinUNETR(
-                in_channels=4,
-                out_channels=3,
-                feature_size=self.hparams.feature_size,
-                use_modality_attention=self.hparams.use_modality_attention
-            )
-        else:
-            self.model = SwinUNETR(
-                in_channels=4,
-                out_channels=3,
-                feature_size=self.hparams.feature_size,
-                use_checkpoint=True,
-                use_v2=self.hparams.use_v2,
-                spatial_dims=3,
-                depths=self.hparams.depths,
-                num_heads=self.hparams.num_heads,
-                norm_name="instance",
-                drop_rate=0.0,
-                attn_drop_rate=0.0,
-                dropout_path_rate=0.0,
-                downsample=self.hparams.downsample,
-                
-            )
+        # Only use vanilla SwinUNETR
+        self.model = SwinUNETR(
+            in_channels=4,
+            out_channels=3,
+            feature_size=self.hparams.feature_size,
+            use_checkpoint=True,
+            use_v2=self.hparams.use_v2,
+            spatial_dims=3,
+            depths=self.hparams.depths,
+            num_heads=self.hparams.num_heads,
+            norm_name="instance",
+            drop_rate=0.0,
+            attn_drop_rate=0.0,
+            dropout_path_rate=0.0,
+            downsample=self.hparams.downsample,
+            
+        )
         
         # Class weights based on BraTS imbalance: ET (most rare) > TC > WT
         if self.hparams.use_class_weights:
