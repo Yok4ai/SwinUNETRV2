@@ -19,6 +19,7 @@ def parse_cli_args():
     parser.add_argument('--loss_type', type=str, default='hybrid', choices=['hybrid', 'dice'], help='Loss function: hybrid (DiceCE+Focal) or dice (Dice only)')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for optimizer')
     parser.add_argument('--warmup_epochs', type=int, default=30, help='Number of warmup epochs for LR scheduler')
+    parser.add_argument('--use_class_weights', action='store_true', help='Use class weights for loss (default: False)')
     return parser.parse_args()
 
 cli_args = parse_cli_args()
@@ -64,7 +65,7 @@ args = argparse.Namespace(
     downsample="mergingv2",
     
     # Enhanced model options
-    use_class_weights=False,
+    use_class_weights=cli_args.use_class_weights,
     
     # Validation settings
     val_interval=1,
