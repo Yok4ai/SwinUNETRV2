@@ -137,7 +137,7 @@ class BrainTumorSegmentation(pl.LightningModule):
             tta_transforms = get_tta_transforms()
             self.tta = TestTimeAugmentation(
                 transform=tta_transforms,
-                batch_size=4,  # Number of TTA realizations
+                batch_size=1,  # Number of TTA realizations
                 num_workers=0,
                 inferrer_fn=lambda x: sliding_window_inference(
                     x, roi_size=self.hparams.roi_size, sw_batch_size=1, 
