@@ -134,24 +134,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         
         # Setup TTA if enabled  
         self.use_tta = use_tta
-        if self.use_tta:
-            # Simplified TTA without dictionary transforms
-            from monai.transforms import RandFlip
-            self.tta_transforms = Compose([
-                RandFlip(prob=1.0, spatial_axis=0),
-                RandFlip(prob=1.0, spatial_axis=1), 
-                RandFlip(prob=1.0, spatial_axis=2),
-            ])
-            self.tta = TestTimeAugmentation(
-                transform=self.tta_transforms,
-                batch_size=2,  # Process 2 augmented versions at once
-                num_workers=0,
-                inferrer_fn=lambda x: sliding_window_inference(
-                    x, roi_size=self.hparams.roi_size, sw_batch_size=1, 
-                    predictor=self.model, overlap=overlap
-                ),
-                device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            )
         
         self.best_metric = -1
         self.train_loader = train_loader
@@ -279,10 +261,35 @@ class BrainTumorSegmentation(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
-        
         if self.use_tta:
-            # Use Test Time Augmentation - pass tensor directly 
-            val_outputs = self.tta(val_inputs)
+            # Use MONAI's TestTimeAugmentation for TTA
+            tta_transform = Compose([
+                RandFlipd(keys="image", prob=1.0, spatial_axis=0),
+                RandFlipd(keys="image", prob=1.0, spatial_axis=1),
+                RandFlipd(keys="image", prob=1.0, spatial_axis=2),
+            ])
+            def inferrer_fn(data):
+                return sliding_window_inference(
+                    data["image"],
+                    roi_size=self.hparams.roi_size,
+                    sw_batch_size=1,
+                    predictor=self.model,
+                    overlap=self.overlap
+                )
+            tta = TestTimeAugmentation(
+                transform=tta_transform,
+                batch_size=4,
+                num_workers=0,
+                inferrer_fn=inferrer_fn,
+                device=val_inputs.device,
+                image_key="image",
+                orig_key="image",
+                post_func=None,
+                return_full_data=True
+            )
+            input_dict = {"image": val_inputs}
+            tta_outputs = tta(input_dict)  # shape: [N, C, ...]
+            val_outputs = tta_outputs.mean(dim=0, keepdim=True)  # mean over TTA realizations
         else:
             # Standard sliding window inference
             val_outputs = sliding_window_inference(

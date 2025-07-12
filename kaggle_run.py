@@ -37,7 +37,7 @@ cli_args = parse_cli_args()
 
 """
 ## Example usage - Optimal settings for 50 epochs to beat baseline:
-!python kaggle_run.py \
+!python /kaggle/working/SwinUNETRV2/kaggle_run.py \
   --dataset brats2023 \
   --epochs 50 \
   --batch_size 1 \
@@ -52,12 +52,13 @@ cli_args = parse_cli_args()
   --early_stopping_patience 8 \
   --limit_val_batches 3 \
   --val_interval 1 \
-  --use_class_weights \
   --class_weights 1.0 4.0 6.0 \
   --dice_ce_weight 0.7 \
   --focal_weight 0.3 \
   --threshold 0.5 \
-  --use_tta
+  --use_tta \
+  --use_class_weights \
+  --use_modality_attention
 
 # Alternative: Memory-optimized for smaller GPU
 !python kaggle_run.py \
