@@ -289,7 +289,8 @@ class BrainTumorSegmentation(pl.LightningModule):
             )
             tta_outputs_list = []
             for i in range(val_inputs.shape[0]):
-                input_dict = {"image": val_inputs[i]}
+                # Gather all keys for the i-th sample (handle tensors and non-tensors)
+                input_dict = {k: (v[i] if isinstance(v, torch.Tensor) and v.shape[0] == val_inputs.shape[0] else v) for k, v in batch.items()}
                 tta_result = tta(input_dict)  # shape: [N, C, ...]
                 tta_outputs_list.append(tta_result.mean(dim=0, keepdim=True))  # mean over TTA realizations
             val_outputs = torch.cat(tta_outputs_list, dim=0)  # shape: [B, C, ...]
