@@ -21,29 +21,70 @@ def parse_cli_args():
     parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs for LR scheduler')
     parser.add_argument('--use_class_weights', action='store_true', help='Use class weights for loss (default: False)')
     parser.add_argument('--use_modality_attention', action='store_true', help='Enable Modality Attention module (default: False)')
-    parser.add_argument('--overlap', type=float, default=0.7, help='Sliding window inference overlap (default: 0.5)')
+    parser.add_argument('--overlap', type=float, default=0.7, help='Sliding window inference overlap (default: 0.7)')
     parser.add_argument('--use_tta', action='store_true', help='Enable Test Time Augmentation for validation (default: False)')
+    parser.add_argument('--class_weights', type=float, nargs=3, default=[1.0, 3.0, 5.0], help='Class weights for Background, WT, TC (default: 1.0 3.0 5.0)')
+    parser.add_argument('--dice_ce_weight', type=float, default=0.6, help='Weight for DiceCE loss in hybrid mode (default: 0.6)')
+    parser.add_argument('--focal_weight', type=float, default=0.4, help='Weight for Focal loss in hybrid mode (default: 0.4)')
+    parser.add_argument('--threshold', type=float, default=0.5, help='Threshold for post-processing discrete output (default: 0.5)')
+    parser.add_argument('--roi_size', type=int, nargs=3, default=[96, 96, 96], help='ROI size for sliding window inference (default: 96 96 96)')
+    parser.add_argument('--early_stopping_patience', type=int, default=15, help='Early stopping patience epochs (default: 15)')
+    parser.add_argument('--limit_val_batches', type=int, default=5, help='Limit validation batches for faster validation (default: 5)')
+    parser.add_argument('--val_interval', type=int, default=1, help='Validation interval in epochs (default: 1)')
     return parser.parse_args()
 
 cli_args = parse_cli_args()
 
 """
-# Example usage:
+# Example usage - Optimal settings for 50 epochs to beat baseline:
+!python kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 50 \
+  --batch_size 1 \
+  --num_workers 3 \
+  --img_size 128 \
+  --feature_size 48 \
+  --roi_size 128 128 128 \
+  --overlap 0.7 \
+  --loss_type hybrid \
+  --learning_rate 5e-4 \
+  --warmup_epochs 5 \
+  --early_stopping_patience 8 \
+  --limit_val_batches 3 \
+  --val_interval 1 \
+  --use_class_weights \
+  --class_weights 1.0 4.0 6.0 \
+  --dice_ce_weight 0.7 \
+  --focal_weight 0.3 \
+  --threshold 0.5 \
+  --use_tta
+
+# Alternative: Memory-optimized for smaller GPU
+!python kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 75 \
+  --batch_size 1 \
+  --img_size 96 \
+  --roi_size 96 96 96 \
+  --learning_rate 3e-4 \
+  --warmup_epochs 8 \
+  --early_stopping_patience 12 \
+  --limit_val_batches 5 \
+  --use_class_weights \
+  --use_tta
+
+# Conservative: Standard settings for longer training
 !python kaggle_run.py \
   --dataset brats2023 \
   --epochs 100 \
   --batch_size 2 \
-  --num_workers 3 \
   --img_size 96 \
-  --feature_size 48 \
-  --overlap 0.7 \
-  --loss_type dice \
+  --roi_size 96 96 96 \
   --learning_rate 1e-4 \
   --warmup_epochs 10 \
-  --use_class_weights \
-  --use_modality_attention \
-  --use_tta
-#
+  --early_stopping_patience 15 \
+  --use_class_weights
+
 # Omit --use_class_weights, --use_modality_attention, and --use_tta to disable them (they are store_true flags)
 """
 
@@ -93,21 +134,21 @@ args = argparse.Namespace(
     use_tta=cli_args.use_tta,
     
     # Loss and training configuration
-    class_weights=(1.0, 3.0, 5.0),  # Background, WT, TC, ET
-    dice_ce_weight=0.6,
-    focal_weight=0.4,
-    threshold=0.5,
+    class_weights=tuple(cli_args.class_weights),  # Background, WT, TC, ET
+    dice_ce_weight=cli_args.dice_ce_weight,
+    focal_weight=cli_args.focal_weight,
+    threshold=cli_args.threshold,
     optimizer_betas=(0.9, 0.999),
     optimizer_eps=1e-8,
     
     # Validation settings
-    val_interval=1,
+    val_interval=cli_args.val_interval,
     save_interval=1,
-    early_stopping_patience=15,
-    limit_val_batches=5,  # Reduced for memory efficiency
+    early_stopping_patience=cli_args.early_stopping_patience,
+    limit_val_batches=cli_args.limit_val_batches,
     
     # Inference parameters
-    roi_size=[96, 96, 96],  # Reduced ROI size
+    roi_size=cli_args.roi_size,
     sw_batch_size=1,
     overlap=cli_args.overlap,
     loss_type=cli_args.loss_type,
@@ -126,6 +167,13 @@ print(f"🗂️ Dataset: {args.dataset}")
 print(f"🏋️ Use class weights: {args.use_class_weights}")
 print(f"🧠 Use modality attention: {args.use_modality_attention}")
 print(f"🔄 Use TTA: {args.use_tta}")
+print(f"⚖️ Class weights: {args.class_weights}")
+print(f"🎯 DiceCE weight: {args.dice_ce_weight}, Focal weight: {args.focal_weight}")
+print(f"🎚️ Threshold: {args.threshold}")
+print(f"🔲 ROI size: {args.roi_size}")
+print(f"⏹️ Early stop patience: {args.early_stopping_patience}")
+print(f"🔢 Limit val batches: {args.limit_val_batches}")
+print(f"📅 Val interval: {args.val_interval}")
 
 def run_with_error_handling():
     """Run training with comprehensive error handling"""
