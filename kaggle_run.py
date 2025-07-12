@@ -18,7 +18,7 @@ def parse_cli_args():
     parser.add_argument('--feature_size', type=int, default=48, help='Model feature size')
     parser.add_argument('--loss_type', type=str, default='hybrid', choices=['hybrid', 'dice'], help='Loss function: hybrid (DiceCE+Focal) or dice (Dice only)')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for optimizer')
-    parser.add_argument('--warmup_epochs', type=int, default=30, help='Number of warmup epochs for LR scheduler')
+    parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs for LR scheduler')
     parser.add_argument('--use_class_weights', action='store_true', help='Use class weights for loss (default: False)')
     parser.add_argument('--use_modality_attention', action='store_true', help='Enable Modality Attention module (default: False)')
     return parser.parse_args()
