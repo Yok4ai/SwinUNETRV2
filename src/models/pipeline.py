@@ -278,7 +278,7 @@ class BrainTumorSegmentation(pl.LightningModule):
                 )
             tta = TestTimeAugmentation(
                 transform=tta_transform,
-                batch_size=4,
+                batch_size=1,
                 num_workers=0,
                 inferrer_fn=inferrer_fn,
                 device=val_inputs.device,
