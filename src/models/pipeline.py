@@ -262,7 +262,7 @@ class BrainTumorSegmentation(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
         if self.use_tta:
-            # Use MONAI's TestTimeAugmentation for TTA
+            # Use MONAI's TestTimeAugmentation for TTA, per instance
             tta_transform = Compose([
                 RandFlipd(keys="image", prob=1.0, spatial_axis=0),
                 RandFlipd(keys="image", prob=1.0, spatial_axis=1),
@@ -287,9 +287,12 @@ class BrainTumorSegmentation(pl.LightningModule):
                 post_func=None,
                 return_full_data=True
             )
-            input_dict = {"image": val_inputs}
-            tta_outputs = tta(input_dict)  # shape: [N, C, ...]
-            val_outputs = tta_outputs.mean(dim=0, keepdim=True)  # mean over TTA realizations
+            tta_outputs_list = []
+            for i in range(val_inputs.shape[0]):
+                input_dict = {"image": val_inputs[i]}
+                tta_result = tta(input_dict)  # shape: [N, C, ...]
+                tta_outputs_list.append(tta_result.mean(dim=0, keepdim=True))  # mean over TTA realizations
+            val_outputs = torch.cat(tta_outputs_list, dim=0)  # shape: [B, C, ...]
         else:
             # Standard sliding window inference
             val_outputs = sliding_window_inference(
