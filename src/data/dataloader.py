@@ -1,6 +1,7 @@
 import json
 import os
 from monai.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split
 
 def get_dataloaders(data_dir, batch_size, num_workers, train_transforms, val_transforms):
     """
@@ -21,10 +22,8 @@ def get_dataloaders(data_dir, batch_size, num_workers, train_transforms, val_tra
     with open(dataset_path) as f:
         datalist = json.load(f)["training"]
     
-    # Split into train and validation (80/20 split)
-    train_size = int(len(datalist) * 0.8)
-    train_files = datalist[:train_size]
-    val_files = datalist[train_size:]
+    # Randomly split into train and validation (80/20 split)
+    train_files, val_files = train_test_split(datalist, test_size=0.2, random_state=42)
 
     # Create datasets
     train_ds = Dataset(data=train_files, transform=train_transforms)

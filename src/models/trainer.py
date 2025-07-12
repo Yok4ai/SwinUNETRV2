@@ -11,12 +11,10 @@ from src.models.pipeline import BrainTumorSegmentation
 def setup_training(train_loader, val_loader, args):
     """
     Setup training with direct parameter passing from args
-    
     Args:
         train_loader: Training DataLoader
         val_loader: Validation DataLoader
-        args: Argument namespace containing all configuration parameters
-    
+        args: Argument namespace containing all configuration parameters (use_class_weights should be set in the namespace)
     Returns:
         model: BrainTumorSegmentation model
         trainer: PyTorch Lightning trainer
@@ -44,7 +42,7 @@ def setup_training(train_loader, val_loader, args):
     wandb_logger = WandbLogger(
         project="brain-tumor-segmentation",
         name="swinunetr-v2-experimental",
-        log_model=True
+        log_model=False
     )
 
     # Initialize model
@@ -54,17 +52,24 @@ def setup_training(train_loader, val_loader, args):
         max_epochs=args.epochs,
         val_interval=args.val_interval,
         learning_rate=args.learning_rate,
+        warmup_epochs=args.warmup_epochs,
+        weight_decay=args.weight_decay,
         roi_size=args.roi_size,
         sw_batch_size=args.sw_batch_size,
         use_v2=args.use_v2,
         depths=args.depths,
         num_heads=args.num_heads,
         downsample=args.downsample,
-        use_enhanced_model=getattr(args, 'use_enhanced_model', False),
-        use_modality_attention=getattr(args, 'use_modality_attention', True),
-        use_mlp_decoder=getattr(args, 'use_mlp_decoder', True),
-        mlp_hidden_ratio=getattr(args, 'mlp_hidden_ratio', 4),
-        dropout_rate=getattr(args, 'dropout_rate', 0.1),
+        use_class_weights=getattr(args, 'use_class_weights', True),
+        loss_type=getattr(args, 'loss_type', 'hybrid'),
+        use_modality_attention=getattr(args, 'use_modality_attention', False),
+        overlap=getattr(args, 'overlap', 0.7),
+        class_weights=getattr(args, 'class_weights', (1.0, 3.0, 5.0)),
+        dice_ce_weight=getattr(args, 'dice_ce_weight', 0.6),
+        focal_weight=getattr(args, 'focal_weight', 0.4),
+        threshold=getattr(args, 'threshold', 0.5),
+        optimizer_betas=getattr(args, 'optimizer_betas', (0.9, 0.999)),
+        optimizer_eps=getattr(args, 'optimizer_eps', 1e-8),
     )
 
     # Setup trainer

@@ -52,28 +52,3 @@ def main(args):
     # Step 4: Train model
     print("Step 4: Starting training...")
     train_model(model, trainer, train_loader, val_loader)
-
-if __name__ == "__main__":
-    # Create argument parser
-    parser = argparse.ArgumentParser(description="Train SwinUNETR-V2 for brain tumor segmentation")
-    
-    # Add arguments
-    parser.add_argument("--input_dir", type=str, required=True, help="Input data directory")
-    parser.add_argument("--batch_size", type=int, default=2, help="Batch size for training")
-    parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for data loading")
-    parser.add_argument("--img_size", type=int, default=64, help="Input image size")
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--epochs", type=int, default=5, help="Number of epochs")
-    parser.add_argument("--use_amp", action="store_true", help="Use automatic mixed precision")
-    parser.add_argument("--use_enhanced_model", action="store_true", help="Use Enhanced SwinUNETR with modality attention and MLP decoder")
-    parser.add_argument("--use_modality_attention", action="store_true", help="Enable modality attention module in enhanced model")
-    parser.add_argument("--use_mlp_decoder", action="store_true", help="Enable MLP decoder in enhanced model")
-    parser.add_argument("--mlp_hidden_ratio", type=int, default=4, help="MLP hidden ratio for enhanced model")
-    parser.add_argument("--dropout_rate", type=float, default=0.1, help="Dropout rate for enhanced model")
-    parser.add_argument("--dataset", type=str, required=True, help="Dataset type (e.g., 'brats2021', 'brats2023')")
-    
-    # Parse arguments
-    args = parser.parse_args()
-    
-    # Run main function
-    main(args)

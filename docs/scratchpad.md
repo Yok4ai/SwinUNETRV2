@@ -1,23 +1,25 @@
-# Scratchpad
+# SwinUNETR Pipeline Scratchpad
 
-## TODOs
-- [ ] Add tests for data pipeline and model training
-- [ ] Improve CLI argument validation in `main.py`
-- [ ] Add more data augmentations (elastic, gamma, etc.)
-- [ ] Refactor visualization to support more modalities
-- [ ] Add support for BraTS 2024 if format changes
-- [ ] Document all public functions/classes
-- [ ] Add example notebooks for inference and visualization
+## Quick Reference
 
-## Experimental Notes
-- Current training uses only 20% of training data for speed; revert for full runs.
-- Class weights for Dice/Focal loss are set for BraTS imbalance (can tune).
-- SwinUNETR-V2 uses residual conv blocks at each Swin stage (see `use_v2`).
-- Sliding window inference overlap is 0.6 for validation.
-- Visualization currently assumes T1c as first channel; generalize for multi-modal.
+- **Augmentations:**
+  - Training: random crop, flip, rotate, intensity, noise, contrast
+  - Validation: only normalization
+- **Dataloader:**
+  - Uses sklearn's train_test_split for reproducible 80/20 split
+- **Label Conversion:**
+  - Converts raw labels to 3-channel (TC, WT, ET)
+- **Model:**
+  - SwinUNETR backbone
+  - Optional Modality Attention (toggle: --use_modality_attention)
+- **Loss:**
+  - Dice only or hybrid (DiceCE+Focal), toggle: --loss_type
+  - Optional class weights: --use_class_weights
+- **Logging:**
+  - wandb logs metrics and sample images (input, pred, label)
+- **Entrypoint:**
+  - Run everything via `kaggle_run.py` with CLI args
 
-## Ideas
-- Add self-supervised pretraining for SwinUNETR backbone
-- Integrate more advanced logging (TensorBoard, custom callbacks)
-- Add support for test-time augmentation
-- Modularize config (YAML/JSON) for reproducibility 
+## Example CLI
+
+See the example block in `kaggle_run.py` for a full command. 

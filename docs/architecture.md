@@ -1,47 +1,71 @@
-# Project Architecture
+# SwinUNETR-V2 Pipeline Architecture
 
-## Folder Structure
-- `src/data/`
-  - `augmentations.py`: Defines MONAI-based data augmentations for training and validation. Now supports a `dataset` argument to select label conventions (BRATS 2021 or 2023).
-  - `dataloader.py`: Loads data from BraTS-format `dataset.json`, splits into train/val, applies transforms.
-  - `convert_labels.py`: Converts BraTS labels to multi-channel format (TC, WT, ET). Supports both BRATS 2021 (ET=4) and BRATS 2023 (ET=3) via a `dataset` argument.
-- `src/models/`
-  - `swinunetr.py`: Implements the SwinUNETR-V2 model (3D Swin Transformer + UNet blocks).
-  - `pipeline.py`: PyTorch Lightning module for training, validation, and metric logging.
-  - `trainer.py`: Sets up data loaders, callbacks, and Lightning Trainer.
-- `src/utils/`
-  - `visualization.py`: Visualization utilities for predictions and training curves.
-- `main.py`: Entry point for training, argument parsing, and pipeline orchestration. Passes the `dataset` argument to the data pipeline.
+## 1. Data Augmentation (`src/data/augmentations.py`)
+- **Purpose:** Enhance model robustness and generalization.
+- **Training Augmentations:**
+  - Loading, channel formatting, orientation, spacing
+  - Random spatial cropping, flipping, rotation
+  - Intensity normalization, scaling, shifting
+  - Optional: Gaussian noise, contrast adjustment
+- **Validation Augmentations:**
+  - Only essential preprocessing (no random augmentations)
 
-## Data Flow
-1. **Transforms**: `get_transforms` in `augmentations.py` defines training/validation pipelines (spatial, intensity, geometric, and label conversion). The `dataset` argument is passed to select the correct label mapping for BRATS 2021 or 2023.
-2. **Data Loading**: `dataloader.py` loads and splits data, applies transforms, returns MONAI Datasets.
-3. **Label Conversion**: `convert_labels.py` maps BraTS labels to 3 output channels (TC, WT, ET), with the ET label set to 3 (BRATS 2023) or 4 (BRATS 2021) depending on the `dataset` argument.
+## 2. Dataloader (`src/data/dataloader.py`)
+- **Purpose:** Prepare PyTorch DataLoader objects for training and validation.
+- **Key Steps:**
+  - Loads a JSON datalist and splits it into train/val using `train_test_split` (random, reproducible split)
+  - Applies the appropriate transforms
+  - Returns DataLoader objects with correct shuffling and batching
 
-## Model Architecture
-- **SwinUNETR-V2** (`swinunetr.py`):
-  - 3D Swin Transformer backbone with hierarchical attention.
-  - UNet-style skip connections and upsampling blocks.
-  - Configurable: input channels, output channels, feature size, depths, heads, window size, etc.
-  - V2: Adds residual conv blocks at each Swin stage.
+## 3. Label Conversion (`src/data/convert_labels.py`)
+- **Purpose:** Convert raw segmentation labels to multi-channel format (TC, WT, ET) for BraTS 2021/2023.
+- **Logic:**
+  - Maps dataset-specific label values to three binary channels
 
-## Training Pipeline
-- **Lightning Module** (`pipeline.py`):
-  - Handles forward, loss (DiceCE + Focal), metrics (Dice, per-class), and logging.
-  - Uses sliding window inference for validation.
-  - Stores best model by validation Dice.
-- **Trainer Setup** (`trainer.py`):
-  - DataLoader setup with configurable batch size, workers, pin_memory, etc.
-  - Early stopping, checkpointing, and wandb logging.
-  - Supports AMP, DDP, and gradient clipping.
+## 4. Model: SwinUNETR + Optional Modality Attention (`src/models/pipeline.py`)
+- **Purpose:** 3D medical image segmentation using a transformer-based architecture.
+- **Components:**
+  - **ModalityAttentionModule (optional):** Learns channel/spatial attention across MRI modalities. Enabled via `--use_modality_attention`.
+  - **SwinUNETR:** Main segmentation backbone. Configurable via CLI (feature size, depths, heads, etc).
+- **Loss:**
+  - Dice, DiceCE+Focal (hybrid), or Dice only (CLI toggle)
+  - Optional class weights (CLI toggle)
+- **Metrics:**
+  - Dice, IoU, Hausdorff, precision, recall, F1
+  - Per-class and mean metrics
+- **Wandb Logging:**
+  - Logs metrics and sample segmentation images (input, prediction, label) per validation epoch
 
-## Utilities
-- **Visualization** (`visualization.py`):
-  - Batch and prediction visualization.
-  - Training/validation curve plotting.
+## 5. Training Logic (`src/models/trainer.py`)
+- **Purpose:** Orchestrate model training and validation using PyTorch Lightning.
+- **Key Features:**
+  - Early stopping (monitors val_mean_dice, configurable patience/min_delta)
+  - Model checkpointing (local only, not wandb)
+  - WandbLogger for experiment tracking
+  - Passes all CLI/config arguments to the model
 
-## Extending/Modifying
-- Add new transforms in `augmentations.py`.
-- Change model config in `main.py` or via CLI args (including `dataset`).
-- Add new metrics/losses in `pipeline.py`.
-- Update docs for all major changes. 
+## 6. Main Entrypoint (`main.py`)
+- **Purpose:** Defines the `main(args)` function, which sets up data, model, and trainer, and starts training.
+- **Note:** No CLI parsing here; all configuration is passed from `kaggle_run.py`.
+
+## 7. Experiment Runner (`kaggle_run.py`)
+- **Purpose:** User-facing script for running experiments with full CLI support.
+- **Features:**
+  - Parses all relevant arguments (dataset, epochs, batch size, model/loss options, augmentation toggles, etc)
+  - Prepares the environment and data
+  - Constructs an `args` namespace and calls `main(args)`
+  - Prints a summary of the configuration
+  - Handles errors gracefully
+
+## 8. Typical Flow
+1. **User runs** `kaggle_run.py` with desired CLI arguments.
+2. **Data is prepared** and split, augmentations are set up.
+3. **Dataloaders** are created and passed to the model.
+4. **Model** (SwinUNETR, optionally with Modality Attention) is initialized.
+5. **Trainer** is set up with callbacks and wandb logging.
+6. **Training/validation** proceeds, with metrics and images logged to wandb.
+7. **Best model** (by Dice) is saved locally.
+
+---
+
+**For more details, see the respective files in `src/` and the CLI example in `kaggle_run.py`.** 

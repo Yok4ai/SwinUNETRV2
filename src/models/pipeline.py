@@ -5,7 +5,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 from monai.losses import DiceLoss, DiceCELoss, FocalLoss
 from monai.metrics import DiceMetric, MeanIoU, HausdorffDistanceMetric
-from monai.transforms import Compose, Activations, AsDiscrete
+from monai.transforms import Compose, Activations, AsDiscrete, RandFlipd
 from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset
 from monai.inferers import sliding_window_inference
 from torch.optim import Adam, AdamW
@@ -16,8 +16,9 @@ from pytorch_lightning.callbacks.timer import Timer
 from torch.cuda.amp import GradScaler
 import wandb
 from pytorch_lightning.loggers import WandbLogger
-from models.swinunetr import SwinUNETR
 import math
+# from .swinunetr import SwinUNETR
+from monai.networks.nets import SwinUNETR
 
 class ModalityAttentionModule(nn.Module):
     """
@@ -57,81 +58,6 @@ class ModalityAttentionModule(nn.Module):
         x_refined = x_channel * spatial_attention
         return x_refined + x  # Residual connection
 
-class MLPDecoder(nn.Module):
-    """
-    MLP Decoder module to reduce over-parameterization in the decoder.
-    """
-    def __init__(self, in_channels: int, hidden_channels: int, out_channels: int, dropout_rate: float = 0.1):
-        super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(in_channels, hidden_channels),
-            nn.LayerNorm(hidden_channels),
-            nn.GELU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_channels, hidden_channels // 2),
-            nn.LayerNorm(hidden_channels // 2),
-            nn.GELU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_channels // 2, out_channels)
-        )
-    def forward(self, x):
-        b, c, d, h, w = x.shape
-        x = x.permute(0, 2, 3, 4, 1).contiguous()  # (B, D, H, W, C)
-        x = x.view(-1, c)  # (B*D*H*W, C)
-        x = self.mlp(x)
-        x = x.view(b, d, h, w, -1)
-        x = x.permute(0, 4, 1, 2, 3).contiguous()  # (B, C, D, H, W)
-        return x
-
-class EnhancedSwinUNETR(nn.Module):
-    """
-    Enhanced SwinUNETR with Modality Attention and MLP Decoder.
-    """
-    def __init__(self, 
-                 in_channels: int = 4,
-                 out_channels: int = 3,
-                 feature_size: int = 48,
-                 use_modality_attention: bool = True,
-                 use_mlp_decoder: bool = True,
-                 mlp_hidden_ratio: int = 4,
-                 dropout_rate: float = 0.1,
-                 **kwargs):
-        super().__init__()
-        self.use_modality_attention = use_modality_attention
-        if use_modality_attention:
-            self.modality_attention = ModalityAttentionModule(in_channels)
-        self.swin_unetr = SwinUNETR(
-            in_channels=in_channels,
-            out_channels=out_channels if not use_mlp_decoder else feature_size,
-            feature_size=feature_size,
-            use_checkpoint=True,
-            use_v2=True,
-            spatial_dims=3,
-            depths=(2, 2, 2, 2),
-            num_heads=(3, 6, 12, 24),
-            norm_name="instance",
-            drop_rate=0.0,
-            attn_drop_rate=0.0,
-            dropout_path_rate=0.0,
-            downsample="mergingv2"
-        )
-        self.use_mlp_decoder = use_mlp_decoder
-        if use_mlp_decoder:
-            mlp_hidden = feature_size * mlp_hidden_ratio
-            self.mlp_decoder = MLPDecoder(
-                in_channels=feature_size,
-                hidden_channels=mlp_hidden,
-                out_channels=out_channels,
-                dropout_rate=dropout_rate
-            )
-    def forward(self, x):
-        if self.use_modality_attention:
-            x = self.modality_attention(x)
-        x = self.swin_unetr(x)
-        if self.use_mlp_decoder:
-            x = self.mlp_decoder(x)
-        return x
-
 class BrainTumorSegmentation(pl.LightningModule):
     def __init__(self, train_loader, val_loader, max_epochs=100,
                  val_interval=1, learning_rate=1e-4, feature_size=48,
@@ -139,53 +65,50 @@ class BrainTumorSegmentation(pl.LightningModule):
                  sw_batch_size=2, use_v2=True, depths=(2, 2, 2, 2),
                  num_heads=(3, 6, 12, 24), downsample="mergingv2",
                  use_class_weights=True,
-                 use_enhanced_model=False,  # NEW ARGUMENT
-                 use_modality_attention=True,  # For EnhancedSwinUNETR
-                 use_mlp_decoder=True,        # For EnhancedSwinUNETR
-                 mlp_hidden_ratio=4,          # For EnhancedSwinUNETR
-                 dropout_rate=0.1,            # For EnhancedSwinUNETR
+                 loss_type='hybrid',
+                 use_modality_attention=False,
+                 overlap=0.7,
+                 class_weights=(1.0, 3.0, 5.0),
+                 dice_ce_weight=0.6,
+                 focal_weight=0.4,
+                 threshold=0.5,
+                 optimizer_betas=(0.9, 0.999),
+                 optimizer_eps=1e-8,
                  ):
         
         super().__init__()
         self.save_hyperparameters()
-        
-        # Base SwinUNETR model
-        if self.hparams.use_enhanced_model:
-            self.model = EnhancedSwinUNETR(
-                in_channels=4,
-                out_channels=3,
-                feature_size=self.hparams.feature_size,
-                use_modality_attention=self.hparams.use_modality_attention,
-                use_mlp_decoder=self.hparams.use_mlp_decoder,
-                mlp_hidden_ratio=self.hparams.mlp_hidden_ratio,
-                dropout_rate=self.hparams.dropout_rate
-            )
-        else:
-            self.model = SwinUNETR(
-                in_channels=4,
-                out_channels=3,
-                feature_size=self.hparams.feature_size,
-                use_checkpoint=True,
-                use_v2=self.hparams.use_v2,
-                spatial_dims=3,
-                depths=self.hparams.depths,
-                num_heads=self.hparams.num_heads,
-                norm_name="instance",
-                drop_rate=0.0,
-                attn_drop_rate=0.0,
-                dropout_path_rate=0.0,
-                downsample=self.hparams.downsample,
-                
-            )
+        self.use_modality_attention = use_modality_attention
+        if self.use_modality_attention:
+            self.modality_attention = ModalityAttentionModule(in_channels=4)
+        # Only use vanilla SwinUNETR
+        self.model = SwinUNETR(
+            in_channels=4,
+            out_channels=3,
+            feature_size=self.hparams.feature_size,
+            use_checkpoint=True,
+            use_v2=self.hparams.use_v2,
+            spatial_dims=3,
+            depths=self.hparams.depths,
+            num_heads=self.hparams.num_heads,
+            norm_name="instance",
+            drop_rate=0.0,
+            attn_drop_rate=0.0,
+            dropout_path_rate=0.0,
+            downsample=self.hparams.downsample,
+            
+        )
         
         # Class weights based on BraTS imbalance: ET (most rare) > TC > WT
         if self.hparams.use_class_weights:
             # Higher weights for more imbalanced classes
-            class_weights = torch.tensor([1.0, 3.0, 5.0])  # Background, WT, TC, ET
+            class_weights = torch.tensor(list(self.hparams.class_weights))  # Background, WT, TC, ET
         else:
             class_weights = None
             
         # Loss functions with class weighting
+        self.loss_type = loss_type
+
         self.dice_loss = DiceLoss(
             smooth_nr=0, smooth_dr=1e-5, squared_pred=True, 
             to_onehot_y=False, sigmoid=True
@@ -204,11 +127,12 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.jaccard_metric = MeanIoU(include_background=True, reduction="mean", ignore_empty=True)
         self.hausdorff_metric = HausdorffDistanceMetric(include_background=False, reduction="mean")
 
-        self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
+        self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=self.hparams.threshold)])
         
         self.best_metric = -1
         self.train_loader = train_loader
         self.val_loader = val_loader
+        self.overlap = overlap
 
         # Training metrics
         self.avg_train_loss_values = []
@@ -227,16 +151,19 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.metric_values_et = []
 
     def forward(self, x):
+        if self.use_modality_attention:
+            x = self.modality_attention(x)
         return self.model(x)
 
     def compute_loss(self, outputs, labels):
-        """Combine DiceCE with class-weighted Focal for imbalanced classes"""
-        dice_ce_loss = self.ce_loss(outputs, labels)
-        focal_loss = self.focal_loss(outputs, labels)
-        
-        # Balanced weighting with more emphasis on focal for imbalance
-        total_loss = 0.6 * dice_ce_loss + 0.4 * focal_loss
-        return total_loss
+        """Compute loss based on loss_type: 'hybrid' (DiceCE+Focal) or 'dice' (Dice only)"""
+        if self.loss_type == 'hybrid':
+            dice_ce_loss = self.ce_loss(outputs, labels)
+            focal_loss = self.focal_loss(outputs, labels)
+            total_loss = self.hparams.dice_ce_weight * dice_ce_loss + self.hparams.focal_weight * focal_loss
+            return total_loss
+        else:
+            return self.dice_loss(outputs, labels)
 
     def compute_metrics(self, outputs, labels):
         """Compute mean precision, recall, and F1 score for the batch."""
@@ -328,14 +255,11 @@ class BrainTumorSegmentation(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
-        
-        # Multiple overlapping predictions for better accuracy
-        roi_size = (96, 96, 96)
-        
-        # Original prediction
+
+        # Standard sliding window inference
         val_outputs = sliding_window_inference(
-            val_inputs, roi_size=roi_size, sw_batch_size=1, 
-            predictor=self.model, overlap=0.6  # Higher overlap
+            val_inputs, roi_size=self.hparams.roi_size, sw_batch_size=1, 
+            predictor=self.model, overlap=self.overlap  # Tunable overlap
         )
         
         # Compute loss with hybrid approach
@@ -343,7 +267,24 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True, on_epoch=True)
         
         val_outputs = [self.post_trans(i) for i in decollate_batch(val_outputs)]    
-        
+
+        # Log images to wandb (only for the first batch of each epoch)
+        if batch_idx == 0 and self.logger is not None and hasattr(self.logger, "experiment"):
+            # Take the first image in the batch
+            img = val_inputs[0, 0].detach().cpu().numpy()  # First channel, first image
+            pred = val_outputs[0][0].detach().cpu().numpy()
+            label = val_labels[0, 0].detach().cpu().numpy()
+            # Normalize for visualization
+            img = (img - img.min()) / (img.max() - img.min() + 1e-8)
+            # Pick a middle slice for 3D volumes
+            slice_idx = img.shape[-1] // 2
+            self.logger.experiment.log({
+                "val_image": wandb.Image(img[..., slice_idx], caption="Input"),
+                "val_pred": wandb.Image(pred[..., slice_idx], caption="Prediction"),
+                "val_label": wandb.Image(label[..., slice_idx], caption="Label"),
+                "global_step": self.global_step
+            })
+
         # Compute Dice
         self.dice_metric(y_pred=val_outputs, y=val_labels)
         self.dice_metric_batch(y_pred=val_outputs, y=val_labels)
@@ -432,8 +373,8 @@ class BrainTumorSegmentation(pl.LightningModule):
             self.model.parameters(), 
             lr=self.hparams.learning_rate, 
             weight_decay=self.hparams.weight_decay,
-            betas=(0.9, 0.999),
-            eps=1e-8
+            betas=self.hparams.optimizer_betas,
+            eps=self.hparams.optimizer_eps
         )
         
         # Warmup + Cosine Annealing
