@@ -277,8 +277,8 @@ class BrainTumorSegmentation(pl.LightningModule):
             # Test Time Augmentation
             # Prepare input for TTA (expects dict with image key)
             tta_input = {"image": val_inputs}
-            # TTA returns mode, mean, std, vvc
-            mode, mean, std, vvc = self.tta(tta_input)
+            # TTA returns mode, mean, std (3 values in current MONAI version)
+            mode, mean, std = self.tta(tta_input)
             val_outputs = mean  # Use mean prediction from TTA
         else:
             # Standard sliding window inference
