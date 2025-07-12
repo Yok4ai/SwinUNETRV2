@@ -68,6 +68,7 @@ class BrainTumorSegmentation(pl.LightningModule):
                  use_class_weights=True,
                  loss_type='hybrid',
                  use_modality_attention=False,
+                 overlap=0.7,
                  ):
         
         super().__init__()
@@ -126,6 +127,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.best_metric = -1
         self.train_loader = train_loader
         self.val_loader = val_loader
+        self.overlap = overlap
 
         # Training metrics
         self.avg_train_loss_values = []
@@ -255,7 +257,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Original prediction
         val_outputs = sliding_window_inference(
             val_inputs, roi_size=roi_size, sw_batch_size=1, 
-            predictor=self.model, overlap=0.5  # Higher overlap
+            predictor=self.model, overlap=self.overlap  # Tunable overlap
         )
         
         # Compute loss with hybrid approach

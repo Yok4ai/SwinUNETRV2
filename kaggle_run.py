@@ -21,6 +21,7 @@ def parse_cli_args():
     parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs for LR scheduler')
     parser.add_argument('--use_class_weights', action='store_true', help='Use class weights for loss (default: False)')
     parser.add_argument('--use_modality_attention', action='store_true', help='Enable Modality Attention module (default: False)')
+    parser.add_argument('--overlap', type=float, default=0.7, help='Sliding window inference overlap (default: 0.5)')
     return parser.parse_args()
 
 cli_args = parse_cli_args()
@@ -96,7 +97,7 @@ args = argparse.Namespace(
     # Inference parameters
     roi_size=[96, 96, 96],  # Reduced ROI size
     sw_batch_size=1,
-    overlap=0.5,
+    overlap=cli_args.overlap,
     loss_type=cli_args.loss_type,
 )
 
