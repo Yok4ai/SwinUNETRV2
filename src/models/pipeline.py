@@ -301,7 +301,9 @@ class BrainTumorSegmentation(pl.LightningModule):
                 val_inputs, roi_size=self.hparams.roi_size, sw_batch_size=1, 
                 predictor=self.model, overlap=self.overlap  # Tunable overlap
             )
-        
+        # Ensure labels are on the same device as outputs
+        val_labels = val_labels.to(val_outputs.device)
+
         # Compute loss with hybrid approach
         val_loss = self.compute_loss(val_outputs, val_labels)
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True, on_epoch=True)
