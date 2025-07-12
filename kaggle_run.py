@@ -36,7 +36,7 @@ def parse_cli_args():
 cli_args = parse_cli_args()
 
 """
-# Example usage - Optimal settings for 50 epochs to beat baseline:
+## Example usage - Optimal settings for 50 epochs to beat baseline:
 !python kaggle_run.py \
   --dataset brats2023 \
   --epochs 50 \

@@ -132,13 +132,15 @@ class BrainTumorSegmentation(pl.LightningModule):
 
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=self.hparams.threshold)])
         
-        # Setup TTA if enabled
+        # Setup TTA if enabled  
         self.use_tta = use_tta
         if self.use_tta:
+            # Simplified TTA without dictionary transforms
+            from monai.transforms import RandFlip
             self.tta_transforms = Compose([
-                RandFlipd(keys="image", prob=1.0, spatial_axis=0),
-                RandFlipd(keys="image", prob=1.0, spatial_axis=1), 
-                RandFlipd(keys="image", prob=1.0, spatial_axis=2),
+                RandFlip(prob=1.0, spatial_axis=0),
+                RandFlip(prob=1.0, spatial_axis=1), 
+                RandFlip(prob=1.0, spatial_axis=2),
             ])
             self.tta = TestTimeAugmentation(
                 transform=self.tta_transforms,
@@ -279,8 +281,8 @@ class BrainTumorSegmentation(pl.LightningModule):
         val_inputs, val_labels = batch["image"], batch["label"]
         
         if self.use_tta:
-            # Use Test Time Augmentation
-            val_outputs = self.tta({"image": val_inputs})["image"]
+            # Use Test Time Augmentation - pass tensor directly 
+            val_outputs = self.tta(val_inputs)
         else:
             # Standard sliding window inference
             val_outputs = sliding_window_inference(
