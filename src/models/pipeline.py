@@ -102,7 +102,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Class weights based on BraTS imbalance: ET (most rare) > TC > WT
         if self.hparams.use_class_weights:
             # Higher weights for more imbalanced classes
-            class_weights = torch.tensor(list(self.hparams.class_weights))  # Background, WT, TC, ET
+            class_weights = torch.tensor(list(self.hparams.class_weights))  # WT, TC, ET
         else:
             class_weights = None
             

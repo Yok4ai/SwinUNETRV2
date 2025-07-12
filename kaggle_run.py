@@ -22,7 +22,7 @@ def parse_cli_args():
     parser.add_argument('--use_class_weights', action='store_true', help='Use class weights for loss (default: False)')
     parser.add_argument('--use_modality_attention', action='store_true', help='Enable Modality Attention module (default: False)')
     parser.add_argument('--overlap', type=float, default=0.7, help='Sliding window inference overlap (default: 0.7)')
-    parser.add_argument('--class_weights', type=float, nargs=3, default=[1.0, 3.0, 5.0], help='Class weights for Background, WT, TC (default: 1.0 3.0 5.0)')
+    parser.add_argument('--class_weights', type=float, nargs=3, default=[3.0, 1.0, 5.0], help='Class weights for TC, WT, ET (default: 3.0 1.0 5.0)')
     parser.add_argument('--dice_ce_weight', type=float, default=0.6, help='Weight for DiceCE loss in hybrid mode (default: 0.6)')
     parser.add_argument('--focal_weight', type=float, default=0.4, help='Weight for Focal loss in hybrid mode (default: 0.4)')
     parser.add_argument('--threshold', type=float, default=0.5, help='Threshold for post-processing discrete output (default: 0.5)')
@@ -51,7 +51,7 @@ cli_args = parse_cli_args()
   --early_stopping_patience 8 \
   --limit_val_batches 3 \
   --val_interval 1 \
-  --class_weights 1.0 4.0 6.0 \
+  --class_weights 4.0 1.0 6.0 \
   --dice_ce_weight 0.7 \
   --focal_weight 0.3 \
   --threshold 0.5 \
@@ -131,7 +131,7 @@ args = argparse.Namespace(
     use_modality_attention=cli_args.use_modality_attention,
     
     # Loss and training configuration
-    class_weights=tuple(cli_args.class_weights),  # Background, WT, TC, ET
+    class_weights=tuple(cli_args.class_weights),  # TC, WT, ET
     dice_ce_weight=cli_args.dice_ce_weight,
     focal_weight=cli_args.focal_weight,
     threshold=cli_args.threshold,
