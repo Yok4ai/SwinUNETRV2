@@ -262,7 +262,7 @@ class BrainTumorSegmentation(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
         if self.use_tta:
-            # Use local TestTimeAugmentation for TTA, per instance
+            # Simple TTA: batch_size=1, just call TTA on the sample dict
             tta_transform = Compose([
                 RandFlipd(keys="image", prob=0.5, spatial_axis=0),
                 RandFlipd(keys="image", prob=0.5, spatial_axis=1),
@@ -272,29 +272,22 @@ class BrainTumorSegmentation(pl.LightningModule):
                 return sliding_window_inference(
                     img, roi_size=self.hparams.roi_size, sw_batch_size=1, predictor=self.model, overlap=self.overlap
                 )
-            num_examples = 8  # Number of TTA realizations per sample
-            batch_size = 1    # Realizations per batch (can tune for speed)
-            tta_outputs_list = []
-            for i in range(val_inputs.shape[0]):
-                # Gather all keys for the i-th sample (handle tensors and non-tensors)
-                input_dict = {k: (v[i] if isinstance(v, torch.Tensor) and v.shape[0] == val_inputs.shape[0] else v) for k, v in batch.items()}
-                # Ensure meta dict is present if available
-                if "image_meta_dict" in batch:
-                    input_dict["image_meta_dict"] = batch["image_meta_dict"][i]
-                tta = TestTimeAugmentation(
-                    transform=tta_transform,
-                    batch_size=batch_size,
-                    num_workers=0,
-                    inferrer_fn=inferrer_fn,
-                    device=val_inputs.device,
-                    image_key="image",
-                    orig_key="image",
-                    return_full_data=True,
-                    progress=False
-                )
-                tta_result = tta(input_dict, num_examples=num_examples)  # shape: [N, C, ...]
-                tta_outputs_list.append(tta_result.mean(dim=0, keepdim=True))  # mean over TTA realizations
-            val_outputs = torch.cat(tta_outputs_list, dim=0)  # shape: [B, C, ...]
+            num_examples = 8
+            tta = TestTimeAugmentation(
+                transform=tta_transform,
+                batch_size=1,
+                num_workers=0,
+                inferrer_fn=inferrer_fn,
+                device=val_inputs.device,
+                image_key="image",
+                orig_key="image",
+                return_full_data=True,
+                progress=False
+            )
+            # batch is a dict with batch_size=1, so just pass the sample dict
+            sample = {k: (v[0] if isinstance(v, torch.Tensor) and v.shape[0] == 1 else v) for k, v in batch.items()}
+            tta_result = tta(sample, num_examples=num_examples)  # shape: [N, C, ...]
+            val_outputs = tta_result.mean(dim=0, keepdim=True)  # mean over TTA realizations
         else:
             # Standard sliding window inference
             val_outputs = sliding_window_inference(
@@ -303,7 +296,7 @@ class BrainTumorSegmentation(pl.LightningModule):
             )
         # Ensure labels are on the same device as outputs
         val_labels = val_labels.to(val_outputs.device)
-
+        
         # Compute loss with hybrid approach
         val_loss = self.compute_loss(val_outputs, val_labels)
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True, on_epoch=True)
