@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 from monai.losses import DiceLoss, DiceCELoss, FocalLoss
 from monai.metrics import DiceMetric, MeanIoU, HausdorffDistanceMetric
 from monai.transforms import Compose, Activations, AsDiscrete, RandFlipd
-from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset
+from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset, TestTimeAugmentation
 from monai.inferers import sliding_window_inference
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
@@ -132,6 +132,20 @@ class BrainTumorSegmentation(pl.LightningModule):
         
         # Setup TTA if enabled  
         self.use_tta = use_tta
+        if self.use_tta:
+            from data.augmentations import get_tta_transforms
+            tta_transforms = get_tta_transforms()
+            self.tta = TestTimeAugmentation(
+                transform=tta_transforms,
+                batch_size=4,  # Number of TTA realizations
+                num_workers=0,
+                inferrer_fn=lambda x: sliding_window_inference(
+                    x, roi_size=self.hparams.roi_size, sw_batch_size=1, 
+                    predictor=self.model, overlap=self.overlap
+                ),
+                device=self.device,
+                image_key="image"
+            )
         
         self.best_metric = -1
         self.train_loader = train_loader
@@ -260,33 +274,12 @@ class BrainTumorSegmentation(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
         if self.use_tta:
-            # Manual TTA: original + 3 flips (for batch_size=1)
-            assert val_inputs.shape[0] == 1, "Manual TTA expects batch_size=1 for validation."
-            img = val_inputs[0]
-            # Original
-            out1 = sliding_window_inference(
-                img.unsqueeze(0), roi_size=self.hparams.roi_size, sw_batch_size=1, predictor=self.model, overlap=self.overlap
-            )
-            # Flip axis 2
-            img2 = torch.flip(img, dims=[2])
-            out2 = sliding_window_inference(
-                img2.unsqueeze(0), roi_size=self.hparams.roi_size, sw_batch_size=1, predictor=self.model, overlap=self.overlap
-            )
-            out2 = torch.flip(out2, dims=[2])
-            # Flip axis 3
-            img3 = torch.flip(img, dims=[3])
-            out3 = sliding_window_inference(
-                img3.unsqueeze(0), roi_size=self.hparams.roi_size, sw_batch_size=1, predictor=self.model, overlap=self.overlap
-            )
-            out3 = torch.flip(out3, dims=[3])
-            # Flip axis 4
-            img4 = torch.flip(img, dims=[4])
-            out4 = sliding_window_inference(
-                img4.unsqueeze(0), roi_size=self.hparams.roi_size, sw_batch_size=1, predictor=self.model, overlap=self.overlap
-            )
-            out4 = torch.flip(out4, dims=[4])
-            # Average all predictions
-            val_outputs = (out1 + out2 + out3 + out4) / 4.0
+            # Test Time Augmentation
+            # Prepare input for TTA (expects dict with image key)
+            tta_input = {"image": val_inputs}
+            # TTA returns mode, mean, std, vvc
+            mode, mean, std, vvc = self.tta(tta_input)
+            val_outputs = mean  # Use mean prediction from TTA
         else:
             # Standard sliding window inference
             val_outputs = sliding_window_inference(

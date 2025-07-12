@@ -69,3 +69,28 @@ def get_transforms(img_size, dataset="brats2023"):
     ])
     
     return train_transforms, val_transforms
+
+def get_tta_transforms():
+    """Get Test Time Augmentation transforms for brain tumor segmentation."""
+    tta_transforms = Compose([
+        # Spatial flips - most reliable for brain images
+        RandFlipd(keys="image", prob=0.5, spatial_axis=0),
+        RandFlipd(keys="image", prob=0.5, spatial_axis=1), 
+        RandFlipd(keys="image", prob=0.5, spatial_axis=2),
+        # Light rotations - conservative for medical images
+        RandRotate90d(keys="image", prob=0.3, spatial_axes=(0, 1)),
+        # Very light affine transformations
+        RandAffined(
+            keys="image",
+            prob=0.3,
+            rotate_range=(0.1, 0.1, 0.1),
+            scale_range=(0.05, 0.05, 0.05),
+            translate_range=(2, 2, 2),
+            padding_mode="border",
+        ),
+        # Minimal intensity augmentations for TTA
+        RandScaleIntensityd(keys="image", factors=0.05, prob=0.3),
+        RandShiftIntensityd(keys="image", offsets=0.05, prob=0.3),
+    ])
+    
+    return tta_transforms
