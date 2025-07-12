@@ -69,13 +69,3 @@ def get_transforms(img_size, dataset="brats2023"):
     ])
     
     return train_transforms, val_transforms
-
-def get_tta_transforms():
-    """Get Test Time Augmentation transforms for brain tumor segmentation."""
-    tta_transforms = Compose([
-        # Only intensity augmentations for TTA - spatial transforms cause batching issues
-        RandScaleIntensityd(keys="image", factors=0.05, prob=0.5),
-        RandShiftIntensityd(keys="image", offsets=0.05, prob=0.5),
-    ])
-    
-    return tta_transforms

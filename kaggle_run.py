@@ -22,7 +22,6 @@ def parse_cli_args():
     parser.add_argument('--use_class_weights', action='store_true', help='Use class weights for loss (default: False)')
     parser.add_argument('--use_modality_attention', action='store_true', help='Enable Modality Attention module (default: False)')
     parser.add_argument('--overlap', type=float, default=0.7, help='Sliding window inference overlap (default: 0.7)')
-    parser.add_argument('--use_tta', action='store_true', help='Enable Test Time Augmentation for validation (default: False)')
     parser.add_argument('--class_weights', type=float, nargs=3, default=[1.0, 3.0, 5.0], help='Class weights for Background, WT, TC (default: 1.0 3.0 5.0)')
     parser.add_argument('--dice_ce_weight', type=float, default=0.6, help='Weight for DiceCE loss in hybrid mode (default: 0.6)')
     parser.add_argument('--focal_weight', type=float, default=0.4, help='Weight for Focal loss in hybrid mode (default: 0.4)')
@@ -56,7 +55,6 @@ cli_args = parse_cli_args()
   --dice_ce_weight 0.7 \
   --focal_weight 0.3 \
   --threshold 0.5 \
-  --use_tta \
   --use_class_weights \
   --use_modality_attention
 
@@ -72,7 +70,6 @@ cli_args = parse_cli_args()
   --early_stopping_patience 12 \
   --limit_val_batches 5 \
   --use_class_weights \
-  --use_tta
 
 # Conservative: Standard settings for longer training
 !python kaggle_run.py \
@@ -86,7 +83,7 @@ cli_args = parse_cli_args()
   --early_stopping_patience 15 \
   --use_class_weights
 
-# Omit --use_class_weights, --use_modality_attention, and --use_tta to disable them (they are store_true flags)
+# Omit --use_class_weights, --use_modality_attention to disable them (they are store_true flags)
 """
 
 # Setup the environment and prepare data
@@ -132,7 +129,6 @@ args = argparse.Namespace(
     # Enhanced model options
     use_class_weights=cli_args.use_class_weights,
     use_modality_attention=cli_args.use_modality_attention,
-    use_tta=cli_args.use_tta,
     
     # Loss and training configuration
     class_weights=tuple(cli_args.class_weights),  # Background, WT, TC, ET
@@ -167,7 +163,6 @@ print(f"📊 Total epochs: {args.epochs}")
 print(f"🗂️ Dataset: {args.dataset}")
 print(f"🏋️ Use class weights: {args.use_class_weights}")
 print(f"🧠 Use modality attention: {args.use_modality_attention}")
-print(f"🔄 Use TTA: {args.use_tta}")
 print(f"⚖️ Class weights: {args.class_weights}")
 print(f"🎯 DiceCE weight: {args.dice_ce_weight}, Focal weight: {args.focal_weight}")
 print(f"🎚️ Threshold: {args.threshold}")

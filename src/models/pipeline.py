@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 from monai.losses import DiceLoss, DiceCELoss, FocalLoss
 from monai.metrics import DiceMetric, MeanIoU, HausdorffDistanceMetric
 from monai.transforms import Compose, Activations, AsDiscrete, RandFlipd
-from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset, TestTimeAugmentation
+from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset
 from monai.inferers import sliding_window_inference
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
@@ -68,7 +68,6 @@ class BrainTumorSegmentation(pl.LightningModule):
                  loss_type='hybrid',
                  use_modality_attention=False,
                  overlap=0.7,
-                 use_tta=False,
                  class_weights=(1.0, 3.0, 5.0),
                  dice_ce_weight=0.6,
                  focal_weight=0.4,
@@ -129,23 +128,6 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.hausdorff_metric = HausdorffDistanceMetric(include_background=False, reduction="mean")
 
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=self.hparams.threshold)])
-        
-        # Setup TTA if enabled  
-        self.use_tta = use_tta
-        if self.use_tta:
-            from data.augmentations import get_tta_transforms
-            tta_transforms = get_tta_transforms()
-            self.tta = TestTimeAugmentation(
-                transform=tta_transforms,
-                batch_size=1,  # Number of TTA realizations
-                num_workers=0,
-                inferrer_fn=lambda x: sliding_window_inference(
-                    x, roi_size=self.hparams.roi_size, sw_batch_size=1, 
-                    predictor=self.model, overlap=self.overlap
-                ),
-                device=self.device,
-                image_key="image"
-            )
         
         self.best_metric = -1
         self.train_loader = train_loader
@@ -273,19 +255,13 @@ class BrainTumorSegmentation(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
-        if self.use_tta:
-            # Test Time Augmentation
-            # Prepare input for TTA (expects dict with image key)
-            tta_input = {"image": val_inputs}
-            # TTA returns mode, mean, std (3 values in current MONAI version)
-            mode, mean, std = self.tta(tta_input)
-            val_outputs = mean  # Use mean prediction from TTA
-        else:
-            # Standard sliding window inference
-            val_outputs = sliding_window_inference(
-                val_inputs, roi_size=self.hparams.roi_size, sw_batch_size=1, 
-                predictor=self.model, overlap=self.overlap  # Tunable overlap
-            )
+
+        # Standard sliding window inference
+        val_outputs = sliding_window_inference(
+            val_inputs, roi_size=self.hparams.roi_size, sw_batch_size=1, 
+            predictor=self.model, overlap=self.overlap  # Tunable overlap
+        )
+        
         # Compute loss with hybrid approach
         val_loss = self.compute_loss(val_outputs, val_labels)
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True, on_epoch=True)
