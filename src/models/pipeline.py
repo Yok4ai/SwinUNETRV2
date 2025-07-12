@@ -19,8 +19,6 @@ from pytorch_lightning.loggers import WandbLogger
 import math
 # from .swinunetr import SwinUNETR
 from monai.networks.nets import SwinUNETR
-from src.data.testtimeaugmentation import TestTimeAugmentation
-
 
 class ModalityAttentionModule(nn.Module):
     """
@@ -262,41 +260,39 @@ class BrainTumorSegmentation(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
         if self.use_tta:
-            # Simple TTA: batch_size=1, just call TTA on the sample dict
-            tta_transform = Compose([
-                RandFlipd(keys="image", prob=0.5, spatial_axis=0),
-                RandFlipd(keys="image", prob=0.5, spatial_axis=1),
-                RandFlipd(keys="image", prob=0.5, spatial_axis=2),
-            ])
-            def inferrer_fn(img):
-                return sliding_window_inference(
-                    img, roi_size=self.hparams.roi_size, sw_batch_size=1, predictor=self.model, overlap=self.overlap
-                )
-            num_examples = 8
-            tta = TestTimeAugmentation(
-                transform=tta_transform,
-                batch_size=1,
-                num_workers=0,
-                inferrer_fn=inferrer_fn,
-                device=val_inputs.device,
-                image_key="image",
-                orig_key="image",
-                return_full_data=True,
-                progress=False
+            # Manual TTA: original + 3 flips (for batch_size=1)
+            assert val_inputs.shape[0] == 1, "Manual TTA expects batch_size=1 for validation."
+            img = val_inputs[0]
+            # Original
+            out1 = sliding_window_inference(
+                img.unsqueeze(0), roi_size=self.hparams.roi_size, sw_batch_size=1, predictor=self.model, overlap=self.overlap
             )
-            # batch is a dict with batch_size=1, so just pass the sample dict
-            sample = {k: (v[0] if isinstance(v, torch.Tensor) and v.shape[0] == 1 else v) for k, v in batch.items()}
-            tta_result = tta(sample, num_examples=num_examples)  # shape: [N, C, ...]
-            val_outputs = tta_result.mean(dim=0, keepdim=True)  # mean over TTA realizations
+            # Flip axis 2
+            img2 = torch.flip(img, dims=[2])
+            out2 = sliding_window_inference(
+                img2.unsqueeze(0), roi_size=self.hparams.roi_size, sw_batch_size=1, predictor=self.model, overlap=self.overlap
+            )
+            out2 = torch.flip(out2, dims=[2])
+            # Flip axis 3
+            img3 = torch.flip(img, dims=[3])
+            out3 = sliding_window_inference(
+                img3.unsqueeze(0), roi_size=self.hparams.roi_size, sw_batch_size=1, predictor=self.model, overlap=self.overlap
+            )
+            out3 = torch.flip(out3, dims=[3])
+            # Flip axis 4
+            img4 = torch.flip(img, dims=[4])
+            out4 = sliding_window_inference(
+                img4.unsqueeze(0), roi_size=self.hparams.roi_size, sw_batch_size=1, predictor=self.model, overlap=self.overlap
+            )
+            out4 = torch.flip(out4, dims=[4])
+            # Average all predictions
+            val_outputs = (out1 + out2 + out3 + out4) / 4.0
         else:
             # Standard sliding window inference
             val_outputs = sliding_window_inference(
                 val_inputs, roi_size=self.hparams.roi_size, sw_batch_size=1, 
                 predictor=self.model, overlap=self.overlap  # Tunable overlap
             )
-        # Ensure labels are on the same device as outputs
-        val_labels = val_labels.to(val_outputs.device)
-        
         # Compute loss with hybrid approach
         val_loss = self.compute_loss(val_outputs, val_labels)
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True, on_epoch=True)
