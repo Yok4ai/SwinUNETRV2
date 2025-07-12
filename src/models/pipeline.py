@@ -5,9 +5,10 @@ import torch.nn as nn
 import pytorch_lightning as pl
 from monai.losses import DiceLoss, DiceCELoss, FocalLoss
 from monai.metrics import DiceMetric, MeanIoU, HausdorffDistanceMetric
-from monai.transforms import Compose, Activations, AsDiscrete
+from monai.transforms import Compose, Activations, AsDiscrete, RandFlipd
 from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset
 from monai.inferers import sliding_window_inference
+from monai.data import TestTimeAugmentation
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
 from monai.data import DataLoader, Dataset
@@ -69,6 +70,13 @@ class BrainTumorSegmentation(pl.LightningModule):
                  loss_type='hybrid',
                  use_modality_attention=False,
                  overlap=0.7,
+                 use_tta=False,
+                 class_weights=(1.0, 3.0, 5.0),
+                 dice_ce_weight=0.6,
+                 focal_weight=0.4,
+                 threshold=0.5,
+                 optimizer_betas=(0.9, 0.999),
+                 optimizer_eps=1e-8,
                  ):
         
         super().__init__()
@@ -97,7 +105,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Class weights based on BraTS imbalance: ET (most rare) > TC > WT
         if self.hparams.use_class_weights:
             # Higher weights for more imbalanced classes
-            class_weights = torch.tensor([1.0, 3.0, 5.0])  # Background, WT, TC, ET
+            class_weights = torch.tensor(list(self.hparams.class_weights))  # Background, WT, TC, ET
         else:
             class_weights = None
             
@@ -122,7 +130,26 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.jaccard_metric = MeanIoU(include_background=True, reduction="mean", ignore_empty=True)
         self.hausdorff_metric = HausdorffDistanceMetric(include_background=False, reduction="mean")
 
-        self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
+        self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=self.hparams.threshold)])
+        
+        # Setup TTA if enabled
+        self.use_tta = use_tta
+        if self.use_tta:
+            self.tta_transforms = Compose([
+                RandFlipd(keys="image", prob=1.0, spatial_axis=0),
+                RandFlipd(keys="image", prob=1.0, spatial_axis=1), 
+                RandFlipd(keys="image", prob=1.0, spatial_axis=2),
+            ])
+            self.tta = TestTimeAugmentation(
+                transform=self.tta_transforms,
+                batch_size=2,  # Process 2 augmented versions at once
+                num_workers=0,
+                inferrer_fn=lambda x: sliding_window_inference(
+                    x, roi_size=self.hparams.roi_size, sw_batch_size=1, 
+                    predictor=self.model, overlap=overlap
+                ),
+                device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            )
         
         self.best_metric = -1
         self.train_loader = train_loader
@@ -155,7 +182,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         if self.loss_type == 'hybrid':
             dice_ce_loss = self.ce_loss(outputs, labels)
             focal_loss = self.focal_loss(outputs, labels)
-            total_loss = 0.6 * dice_ce_loss + 0.4 * focal_loss
+            total_loss = self.hparams.dice_ce_weight * dice_ce_loss + self.hparams.focal_weight * focal_loss
             return total_loss
         else:
             return self.dice_loss(outputs, labels)
@@ -251,14 +278,15 @@ class BrainTumorSegmentation(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         val_inputs, val_labels = batch["image"], batch["label"]
         
-        # Multiple overlapping predictions for better accuracy
-        roi_size = (96, 96, 96)
-        
-        # Original prediction
-        val_outputs = sliding_window_inference(
-            val_inputs, roi_size=roi_size, sw_batch_size=1, 
-            predictor=self.model, overlap=self.overlap  # Tunable overlap
-        )
+        if self.use_tta:
+            # Use Test Time Augmentation
+            val_outputs = self.tta({"image": val_inputs})["image"]
+        else:
+            # Standard sliding window inference
+            val_outputs = sliding_window_inference(
+                val_inputs, roi_size=self.hparams.roi_size, sw_batch_size=1, 
+                predictor=self.model, overlap=self.overlap  # Tunable overlap
+            )
         
         # Compute loss with hybrid approach
         val_loss = self.compute_loss(val_outputs, val_labels)
@@ -371,8 +399,8 @@ class BrainTumorSegmentation(pl.LightningModule):
             self.model.parameters(), 
             lr=self.hparams.learning_rate, 
             weight_decay=self.hparams.weight_decay,
-            betas=(0.9, 0.999),
-            eps=1e-8
+            betas=self.hparams.optimizer_betas,
+            eps=self.hparams.optimizer_eps
         )
         
         # Warmup + Cosine Annealing

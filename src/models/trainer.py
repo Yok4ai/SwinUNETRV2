@@ -64,6 +64,13 @@ def setup_training(train_loader, val_loader, args):
         loss_type=getattr(args, 'loss_type', 'hybrid'),
         use_modality_attention=getattr(args, 'use_modality_attention', False),
         overlap=getattr(args, 'overlap', 0.7),
+        use_tta=getattr(args, 'use_tta', False),
+        class_weights=getattr(args, 'class_weights', (1.0, 3.0, 5.0)),
+        dice_ce_weight=getattr(args, 'dice_ce_weight', 0.6),
+        focal_weight=getattr(args, 'focal_weight', 0.4),
+        threshold=getattr(args, 'threshold', 0.5),
+        optimizer_betas=getattr(args, 'optimizer_betas', (0.9, 0.999)),
+        optimizer_eps=getattr(args, 'optimizer_eps', 1e-8),
     )
 
     # Setup trainer

@@ -22,6 +22,7 @@ def parse_cli_args():
     parser.add_argument('--use_class_weights', action='store_true', help='Use class weights for loss (default: False)')
     parser.add_argument('--use_modality_attention', action='store_true', help='Enable Modality Attention module (default: False)')
     parser.add_argument('--overlap', type=float, default=0.7, help='Sliding window inference overlap (default: 0.5)')
+    parser.add_argument('--use_tta', action='store_true', help='Enable Test Time Augmentation for validation (default: False)')
     return parser.parse_args()
 
 cli_args = parse_cli_args()
@@ -35,13 +36,15 @@ cli_args = parse_cli_args()
   --num_workers 3 \
   --img_size 96 \
   --feature_size 48 \
+  --overlap 0.7 \
   --loss_type dice \
   --learning_rate 1e-4 \
-  --warmup_epochs 30 \
+  --warmup_epochs 10 \
   --use_class_weights \
-  --use_modality_attention
+  --use_modality_attention \
+  --use_tta
 #
-# Omit --use_class_weights and --use_modality_attention to disable them (they are store_true flags)
+# Omit --use_class_weights, --use_modality_attention, and --use_tta to disable them (they are store_true flags)
 """
 
 # Setup the environment and prepare data
@@ -87,6 +90,15 @@ args = argparse.Namespace(
     # Enhanced model options
     use_class_weights=cli_args.use_class_weights,
     use_modality_attention=cli_args.use_modality_attention,
+    use_tta=cli_args.use_tta,
+    
+    # Loss and training configuration
+    class_weights=(1.0, 3.0, 5.0),  # Background, WT, TC, ET
+    dice_ce_weight=0.6,
+    focal_weight=0.4,
+    threshold=0.5,
+    optimizer_betas=(0.9, 0.999),
+    optimizer_eps=1e-8,
     
     # Validation settings
     val_interval=1,
@@ -113,6 +125,7 @@ print(f"📊 Total epochs: {args.epochs}")
 print(f"🗂️ Dataset: {args.dataset}")
 print(f"🏋️ Use class weights: {args.use_class_weights}")
 print(f"🧠 Use modality attention: {args.use_modality_attention}")
+print(f"🔄 Use TTA: {args.use_tta}")
 
 def run_with_error_handling():
     """Run training with comprehensive error handling"""
