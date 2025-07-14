@@ -1,13 +1,22 @@
 # Cursor Project Rules and Guidelines
 
 ## Project Overview
-This project implements a SwinUNETR-V2-based pipeline for brain tumor segmentation using MONAI and PyTorch Lightning. The codebase is modular, with clear separation between data processing, model architecture, training, and utilities.
+This project implements an advanced SwinUNETR V2 pipeline for brain tumor segmentation with comprehensive loss function optimization and local minima escape strategies. Built on MONAI and PyTorch Lightning with extensive customization options.
+
+## Key Features
+- **14 Loss Functions**: Basic, hybrid, and adaptive loss strategies
+- **Adaptive Scheduling**: Dynamic loss weight transitions for curriculum learning
+- **Local Minima Escape**: Warm restarts and plateau detection mechanisms
+- **BraTS Optimization**: Specialized for brain tumor segmentation challenges
+- **Comprehensive CLI**: 30+ configurable parameters for research and competition use
 
 ## Folder Structure
-- `src/data/`: Data loading, augmentation, and label conversion (now supports a `dataset` argument for BRATS 2021/2023 label conventions).
-- `src/models/`: Model architecture (SwinUNETR), training pipeline, and PyTorch Lightning integration.
-- `src/utils/`: Visualization and utility functions.
-- `main.py`: Entry point for training.
+- `src/data/`: Data loading, augmentation, and label conversion (supports BRATS 2021/2023 conventions)
+- `src/models/`: Model architecture (SwinUNETR+), training pipeline with adaptive loss scheduling
+- `src/utils/`: Visualization and utility functions
+- `docs/`: Comprehensive documentation including loss function guide and SOTA strategies
+- `kaggle_run.py`: Main CLI entry point with full parameter control
+- `main.py`: Core training orchestration
 
 ## Code Style
 - Use PEP8 for Python code.

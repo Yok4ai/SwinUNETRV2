@@ -27,12 +27,18 @@
 - **Components:**
   - **ModalityAttentionModule (optional):** Learns channel/spatial attention across MRI modalities. Enabled via `--use_modality_attention`.
   - **SwinUNETR:** Main segmentation backbone. Configurable via CLI (feature size, depths, heads, etc).
-- **Loss:**
-  - Dice, DiceCE+Focal (hybrid), or Dice only (CLI toggle)
-  - Optional class weights (CLI toggle)
+- **Loss Functions (14 total options):**
+  - **Basic:** Dice, DiceCE, DiceFocal, Generalized Dice, Focal, Tversky, Hausdorff
+  - **Hybrid:** GDL+Focal+Tversky, Dice+Hausdorff combinations
+  - **Adaptive:** Structure-boundary scheduling, progressive hybrid, complexity cascade, dynamic performance-based
+  - **Adaptive Scheduling:** Linear, exponential, cosine weight transitions with configurable epochs
+- **Optimization:**
+  - **Standard:** Warmup + Cosine Annealing scheduler
+  - **Advanced:** Cosine Annealing with Warm Restarts for local minima escape
+  - **Local Minima Strategies:** Automatic plateau detection and loss switching recommendations
 - **Metrics:**
   - Dice, IoU, Hausdorff, precision, recall, F1
-  - Per-class and mean metrics
+  - Per-class (TC, WT, ET) and mean metrics
 - **Wandb Logging:**
   - Logs metrics and sample segmentation images (input, prediction, label) per validation epoch
 
@@ -51,11 +57,12 @@
 ## 7. Experiment Runner (`kaggle_run.py`)
 - **Purpose:** User-facing script for running experiments with full CLI support.
 - **Features:**
-  - Parses all relevant arguments (dataset, epochs, batch size, model/loss options, augmentation toggles, etc)
-  - Prepares the environment and data
-  - Constructs an `args` namespace and calls `main(args)`
-  - Prints a summary of the configuration
-  - Handles errors gracefully
+  - **Comprehensive CLI:** 30+ arguments including loss types, adaptive scheduling, warm restarts
+  - **Loss Selection:** 14 different loss functions with full parameter control
+  - **Adaptive Training:** Structure/boundary epoch control, weight scheduling, local minima escape
+  - **Example Configurations:** From quick start to SOTA competition settings
+  - **Environment Setup:** Prepares BraTS data and constructs training arguments
+  - **Error Handling:** Graceful failure with detailed error messages and memory optimization tips
 
 ## 8. Typical Flow
 1. **User runs** `kaggle_run.py` with desired CLI arguments.

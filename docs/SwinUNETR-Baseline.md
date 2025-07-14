@@ -1,12 +1,40 @@
 # Swin Transformers for Semantic Segmentation of Brain Tumors
 
-## 3.3 Loss Function
+## 3.3 Loss Function (Baseline)
 
-The **soft Dice loss function** [30] is employed, computed in a voxel-wise manner as:
+The **soft Dice loss function** [30] is employed in the baseline implementation, computed in a voxel-wise manner as:
 
 $\mathcal{L}(G, Y) = 1 - \frac{2}{J} \sum_{j=1}^{J} \frac{\sum_{i=1}^{I} G_{i,j} Y_{i,j}}{\sum_{i=1}^{I} G_{i,j}^2 + \sum_{i=1}^{I} Y_{i,j}^2}$
 
 Here, $I$ represents the number of voxels, $J$ is the number of classes, $Y_{i,j}$ denotes the **probability of output** for class $j$ at voxel $i$, and $G_{i,j}$ signifies the **one-hot encoded ground truth** for class $j$ at voxel $i$.
+
+### 3.3.1 Enhanced Loss Functions (SwinUNETR V2)
+
+**Our implementation extends beyond the baseline with 14 comprehensive loss options:**
+
+**Basic Loss Functions:**
+- **Dice Loss**: Standard soft Dice coefficient optimization
+- **DiceCE Loss**: Combines Dice + Cross-Entropy for balanced pixel and region optimization
+- **DiceFocal Loss**: Dice + Focal loss for hard example mining and class imbalance
+- **Generalized Dice Loss**: Automatic class reweighting based on inverse frequency
+- **Focal Loss**: Addresses class imbalance by focusing on hard-to-classify examples
+- **Tversky Loss**: Asymmetric loss with configurable precision/recall balance
+- **Hausdorff Distance Loss**: Boundary-focused optimization for shape preservation
+
+**Hybrid Loss Combinations:**
+- **GDL+Focal+Tversky Hybrid**: Triple combination for comprehensive optimization
+- **Dice+Hausdorff Hybrid**: Region overlap + boundary quality optimization
+
+**Adaptive Loss Functions (Novel Contribution):**
+- **Adaptive Structure-Boundary**: Dynamic scheduling from structure (Dice) to boundary (Focal) learning
+- **Adaptive Progressive Hybrid**: 3-phase progression (Dice → Dice+Focal → Dice+Focal+Hausdorff)
+- **Adaptive Complexity Cascade**: 4-stage cascading complexity introduction
+- **Adaptive Dynamic Hybrid**: Performance-based loss weight adaptation
+
+**Local Minima Escape Strategies:**
+- **Cosine Annealing with Warm Restarts**: Periodic learning rate spikes to escape poor optima
+- **Dynamic Loss Scheduling**: Automatic curriculum learning with configurable phase transitions
+- **Plateau Detection**: Automatic identification of training stagnation with escape recommendations
 
 ---
 
