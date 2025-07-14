@@ -17,8 +17,8 @@ from torch.cuda.amp import GradScaler
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 import math
-# from .swinunetr import SwinUNETR
-from monai.networks.nets import SwinUNETR
+from .swinunetrplus import SwinUNETR
+# from monai.networks.nets import SwinUNETR
 
 class ModalityAttentionModule(nn.Module):
     """
