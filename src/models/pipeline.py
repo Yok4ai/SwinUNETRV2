@@ -83,6 +83,18 @@ class BrainTumorSegmentation(pl.LightningModule):
                  threshold=0.5,
                  optimizer_betas=(0.9, 0.999),
                  optimizer_eps=1e-8,
+                 # Adaptive loss scheduling parameters
+                 use_adaptive_scheduling=False,
+                 adaptive_schedule_type='linear',  # 'linear', 'exponential', 'cosine'
+                 structure_epochs=30,  # Focus on structure learning
+                 boundary_epochs=50,   # Focus on boundary refinement
+                 schedule_start_epoch=10,  # When to start scheduling
+                 min_loss_weight=0.1,     # Minimum weight for any loss
+                 max_loss_weight=2.0,     # Maximum weight for any loss
+                 # Warm restart parameters for local minima escape
+                 use_warm_restarts=False,  # Enable cosine annealing with warm restarts
+                 restart_period=20,        # Restart every N epochs
+                 restart_mult=1,           # Multiplier for restart period
                  ):
         
         super().__init__()
@@ -117,6 +129,15 @@ class BrainTumorSegmentation(pl.LightningModule):
             
         # Loss functions with class weighting
         self.loss_type = loss_type
+        
+        # Adaptive scheduling parameters
+        self.use_adaptive_scheduling = use_adaptive_scheduling
+        self.adaptive_schedule_type = adaptive_schedule_type
+        self.structure_epochs = structure_epochs
+        self.boundary_epochs = boundary_epochs
+        self.schedule_start_epoch = schedule_start_epoch
+        self.min_loss_weight = min_loss_weight
+        self.max_loss_weight = max_loss_weight
         
         # Standard loss functions
         self.dice_loss = DiceLoss(
@@ -236,8 +257,191 @@ class BrainTumorSegmentation(pl.LightningModule):
                 self.hparams.lambda_hausdorff * hausdorff_loss
             )
             return total_loss
+        elif self.loss_type == 'adaptive_structure_boundary':
+            # Adaptive loss that schedules between structure (Dice) and boundary (Focal) learning
+            dice_loss = self.dice_loss(outputs, labels)
+            focal_loss = self.focal_loss(outputs, labels)
+            
+            dice_weight, focal_weight = self._get_adaptive_weights()
+            total_loss = dice_weight * dice_loss + focal_weight * focal_loss
+            return total_loss
+        elif self.loss_type == 'adaptive_progressive_hybrid':
+            # Progressive loss that starts with simple Dice, adds complexity over time
+            dice_loss = self.dice_loss(outputs, labels)
+            focal_loss = self.focal_loss(outputs, labels)
+            hausdorff_loss = self.hausdorff_loss(outputs, labels)
+            
+            dice_weight, focal_weight, hausdorff_weight = self._get_progressive_weights()
+            total_loss = (
+                dice_weight * dice_loss + 
+                focal_weight * focal_loss + 
+                hausdorff_weight * hausdorff_loss
+            )
+            return total_loss
+        elif self.loss_type == 'adaptive_complexity_cascade':
+            # Cascading complexity: Dice -> DiceCE -> DiceFocal + Hausdorff
+            dice_loss = self.dice_loss(outputs, labels)
+            dicece_loss = self.dicece_loss(outputs, labels)
+            dicefocal_loss = self.dicefocal_loss(outputs, labels)
+            hausdorff_loss = self.hausdorff_loss(outputs, labels)
+            
+            weights = self._get_cascade_weights()
+            total_loss = (
+                weights['dice'] * dice_loss +
+                weights['dicece'] * dicece_loss +
+                weights['dicefocal'] * dicefocal_loss +
+                weights['hausdorff'] * hausdorff_loss
+            )
+            return total_loss
+        elif self.loss_type == 'adaptive_dynamic_hybrid':
+            # Dynamic hybrid that adapts weights based on validation performance
+            gdl_loss = self.generalized_dice_loss(outputs, labels)
+            focal_loss = self.focal_loss(outputs, labels)
+            tversky_loss = self.tversky_loss(outputs, labels)
+            hausdorff_loss = self.hausdorff_loss(outputs, labels)
+            
+            weights = self._get_dynamic_weights()
+            total_loss = (
+                weights['gdl'] * gdl_loss +
+                weights['focal'] * focal_loss +
+                weights['tversky'] * tversky_loss +
+                weights['hausdorff'] * hausdorff_loss
+            )
+            return total_loss
         else:
             raise ValueError(f"Unknown loss_type: {self.loss_type}")
+
+    def _get_adaptive_weights(self):
+        """Get adaptive weights for structure-boundary scheduling"""
+        if not self.use_adaptive_scheduling or self.current_epoch < self.schedule_start_epoch:
+            return 1.0, 1.0
+        
+        epoch = self.current_epoch - self.schedule_start_epoch
+        max_epoch = self.hparams.max_epochs - self.schedule_start_epoch
+        
+        if self.adaptive_schedule_type == 'linear':
+            # Linear transition from structure focus to boundary focus
+            progress = min(epoch / max_epoch, 1.0)
+            dice_weight = self.max_loss_weight * (1.0 - progress) + self.min_loss_weight * progress
+            focal_weight = self.min_loss_weight * (1.0 - progress) + self.max_loss_weight * progress
+        elif self.adaptive_schedule_type == 'exponential':
+            # Exponential decay for structure, exponential growth for boundary
+            progress = min(epoch / max_epoch, 1.0)
+            dice_weight = self.max_loss_weight * (0.5 ** (progress * 3))
+            focal_weight = self.min_loss_weight + (self.max_loss_weight - self.min_loss_weight) * (1 - 0.5 ** (progress * 3))
+        elif self.adaptive_schedule_type == 'cosine':
+            # Cosine scheduling for smooth transitions
+            progress = min(epoch / max_epoch, 1.0)
+            dice_weight = self.min_loss_weight + (self.max_loss_weight - self.min_loss_weight) * 0.5 * (1 + math.cos(math.pi * progress))
+            focal_weight = self.min_loss_weight + (self.max_loss_weight - self.min_loss_weight) * 0.5 * (1 - math.cos(math.pi * progress))
+        else:
+            dice_weight, focal_weight = 1.0, 1.0
+            
+        return dice_weight, focal_weight
+    
+    def _get_progressive_weights(self):
+        """Get progressive weights that add complexity over time"""
+        if not self.use_adaptive_scheduling or self.current_epoch < self.schedule_start_epoch:
+            return 1.0, 0.0, 0.0
+        
+        epoch = self.current_epoch - self.schedule_start_epoch
+        
+        # Phase 1: Structure learning (Dice dominant)
+        if epoch < self.structure_epochs:
+            dice_weight = self.max_loss_weight
+            focal_weight = self.min_loss_weight
+            hausdorff_weight = 0.0
+        # Phase 2: Add boundary refinement (Focal)
+        elif epoch < self.boundary_epochs:
+            progress = (epoch - self.structure_epochs) / (self.boundary_epochs - self.structure_epochs)
+            dice_weight = self.max_loss_weight * (1.0 - 0.3 * progress)
+            focal_weight = self.min_loss_weight + (self.max_loss_weight - self.min_loss_weight) * progress
+            hausdorff_weight = 0.0
+        # Phase 3: Add fine boundary details (Hausdorff)
+        else:
+            progress = min((epoch - self.boundary_epochs) / 20, 1.0)  # 20 epochs to ramp up
+            dice_weight = self.max_loss_weight * 0.7
+            focal_weight = self.max_loss_weight * 0.8
+            hausdorff_weight = self.min_loss_weight + (self.max_loss_weight * 0.5 - self.min_loss_weight) * progress
+            
+        return dice_weight, focal_weight, hausdorff_weight
+    
+    def _get_cascade_weights(self):
+        """Get cascading complexity weights"""
+        if not self.use_adaptive_scheduling or self.current_epoch < self.schedule_start_epoch:
+            return {'dice': 1.0, 'dicece': 0.0, 'dicefocal': 0.0, 'hausdorff': 0.0}
+        
+        epoch = self.current_epoch - self.schedule_start_epoch
+        max_epoch = self.hparams.max_epochs - self.schedule_start_epoch
+        
+        # Stage 1: Pure Dice (0-25%)
+        # Stage 2: Dice + DiceCE (25-50%)
+        # Stage 3: Dice + DiceCE + DiceFocal (50-75%)
+        # Stage 4: All losses (75-100%)
+        
+        progress = min(epoch / max_epoch, 1.0)
+        
+        if progress < 0.25:
+            weights = {'dice': self.max_loss_weight, 'dicece': 0.0, 'dicefocal': 0.0, 'hausdorff': 0.0}
+        elif progress < 0.5:
+            stage_progress = (progress - 0.25) / 0.25
+            weights = {
+                'dice': self.max_loss_weight * (1.0 - 0.3 * stage_progress),
+                'dicece': self.min_loss_weight + (self.max_loss_weight * 0.7 - self.min_loss_weight) * stage_progress,
+                'dicefocal': 0.0,
+                'hausdorff': 0.0
+            }
+        elif progress < 0.75:
+            stage_progress = (progress - 0.5) / 0.25
+            weights = {
+                'dice': self.max_loss_weight * 0.7,
+                'dicece': self.max_loss_weight * 0.7,
+                'dicefocal': self.min_loss_weight + (self.max_loss_weight * 0.8 - self.min_loss_weight) * stage_progress,
+                'hausdorff': 0.0
+            }
+        else:
+            stage_progress = (progress - 0.75) / 0.25
+            weights = {
+                'dice': self.max_loss_weight * 0.7,
+                'dicece': self.max_loss_weight * 0.7,
+                'dicefocal': self.max_loss_weight * 0.8,
+                'hausdorff': self.min_loss_weight + (self.max_loss_weight * 0.5 - self.min_loss_weight) * stage_progress
+            }
+            
+        return weights
+    
+    def _get_dynamic_weights(self):
+        """Get dynamic weights based on current performance"""
+        if not self.use_adaptive_scheduling or self.current_epoch < self.schedule_start_epoch:
+            return {'gdl': 1.0, 'focal': 0.5, 'tversky': 0.5, 'hausdorff': 0.0}
+        
+        # Get recent validation dice if available
+        recent_dice = getattr(self, 'best_metric', 0.5)
+        
+        # Adaptive strategy based on performance
+        if recent_dice < 0.7:  # Poor performance - focus on structure
+            weights = {
+                'gdl': self.max_loss_weight,
+                'focal': self.min_loss_weight,
+                'tversky': self.min_loss_weight,
+                'hausdorff': 0.0
+            }
+        elif recent_dice < 0.85:  # Moderate performance - balanced approach
+            weights = {
+                'gdl': self.max_loss_weight * 0.8,
+                'focal': self.max_loss_weight * 0.6,
+                'tversky': self.max_loss_weight * 0.6,
+                'hausdorff': self.min_loss_weight
+            }
+        else:  # Good performance - focus on fine details
+            weights = {
+                'gdl': self.max_loss_weight * 0.6,
+                'focal': self.max_loss_weight,
+                'tversky': self.max_loss_weight * 0.8,
+                'hausdorff': self.max_loss_weight * 0.7
+            }
+            
+        return weights
 
     def compute_metrics(self, outputs, labels):
         """Compute mean precision, recall, and F1 score for the batch."""
@@ -451,22 +655,42 @@ class BrainTumorSegmentation(pl.LightningModule):
             eps=self.hparams.optimizer_eps
         )
         
-        # Warmup + Cosine Annealing
-        def lr_lambda(epoch):
-            if epoch < self.hparams.warmup_epochs:
-                return epoch / self.hparams.warmup_epochs
-            else:
-                progress = (epoch - self.hparams.warmup_epochs) / (self.hparams.max_epochs - self.hparams.warmup_epochs)
-                return 0.5 * (1 + math.cos(math.pi * progress))
-        
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-        
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "epoch",
-                "frequency": 1,
-                "name": "learning_rate"
+        if self.hparams.use_warm_restarts:
+            # Cosine Annealing with Warm Restarts (helps escape local minima)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                optimizer,
+                T_0=self.hparams.restart_period,  # Initial restart period
+                T_mult=self.hparams.restart_mult,  # Period multiplier after restart
+                eta_min=self.hparams.learning_rate * 0.01,  # Minimum LR (1% of initial)
+                last_epoch=-1
+            )
+            
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
+                    "frequency": 1,
+                    "name": "learning_rate"
+                }
             }
-        }
+        else:
+            # Original Warmup + Cosine Annealing
+            def lr_lambda(epoch):
+                if epoch < self.hparams.warmup_epochs:
+                    return epoch / self.hparams.warmup_epochs
+                else:
+                    progress = (epoch - self.hparams.warmup_epochs) / (self.hparams.max_epochs - self.hparams.warmup_epochs)
+                    return 0.5 * (1 + math.cos(math.pi * progress))
+            
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+            
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
+                    "frequency": 1,
+                    "name": "learning_rate"
+                }
+            }

@@ -18,7 +18,9 @@ def parse_cli_args():
     parser.add_argument('--feature_size', type=int, default=48, help='Model feature size')
     parser.add_argument('--loss_type', type=str, default='dice', 
                         choices=['dice', 'dicece', 'dicefocal', 'generalized_dice', 'generalized_dice_focal', 
-                                'focal', 'tversky', 'hausdorff', 'hybrid_gdl_focal_tversky', 'hybrid_dice_hausdorff'], 
+                                'focal', 'tversky', 'hausdorff', 'hybrid_gdl_focal_tversky', 'hybrid_dice_hausdorff',
+                                'adaptive_structure_boundary', 'adaptive_progressive_hybrid', 
+                                'adaptive_complexity_cascade', 'adaptive_dynamic_hybrid'], 
                         help='Loss function type')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for optimizer')
     parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs for LR scheduler')
@@ -45,6 +47,19 @@ def parse_cli_args():
     parser.add_argument('--early_stopping_patience', type=int, default=15, help='Early stopping patience epochs (default: 15)')
     parser.add_argument('--limit_val_batches', type=int, default=5, help='Limit validation batches for faster validation (default: 5)')
     parser.add_argument('--val_interval', type=int, default=1, help='Validation interval in epochs (default: 1)')
+    # Adaptive loss scheduling parameters
+    parser.add_argument('--use_adaptive_scheduling', action='store_true', help='Enable adaptive loss scheduling (default: False)')
+    parser.add_argument('--adaptive_schedule_type', type=str, default='linear', choices=['linear', 'exponential', 'cosine'],
+                        help='Type of adaptive scheduling (default: linear)')
+    parser.add_argument('--structure_epochs', type=int, default=30, help='Epochs to focus on structure learning (default: 30)')
+    parser.add_argument('--boundary_epochs', type=int, default=50, help='Epochs to focus on boundary refinement (default: 50)')
+    parser.add_argument('--schedule_start_epoch', type=int, default=10, help='Epoch to start adaptive scheduling (default: 10)')
+    parser.add_argument('--min_loss_weight', type=float, default=0.1, help='Minimum weight for any loss component (default: 0.1)')
+    parser.add_argument('--max_loss_weight', type=float, default=2.0, help='Maximum weight for any loss component (default: 2.0)')
+    # Warm restart parameters for local minima escape
+    parser.add_argument('--use_warm_restarts', action='store_true', help='Enable cosine annealing with warm restarts (default: False)')
+    parser.add_argument('--restart_period', type=int, default=20, help='Restart period in epochs (default: 20)')
+    parser.add_argument('--restart_mult', type=int, default=1, help='Restart period multiplier (default: 1)')
     return parser.parse_args()
 
 cli_args = parse_cli_args()
@@ -103,6 +118,81 @@ cli_args = parse_cli_args()
   --hausdorff_alpha 2.0 \
   --use_class_weights \
   --class_weights 4.0 1.0 6.0
+
+# Adaptive Structure-Boundary Scheduling
+!python /kaggle/working/SwinUNETRV2/kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 100 \
+  --batch_size 1 \
+  --loss_type adaptive_structure_boundary \
+  --learning_rate 1e-4 \
+  --use_adaptive_scheduling \
+  --adaptive_schedule_type cosine \
+  --schedule_start_epoch 15 \
+  --min_loss_weight 0.2 \
+  --max_loss_weight 1.5 \
+  --use_class_weights
+
+# Adaptive Progressive Hybrid
+!python /kaggle/working/SwinUNETRV2/kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 120 \
+  --batch_size 1 \
+  --loss_type adaptive_progressive_hybrid \
+  --learning_rate 1e-4 \
+  --use_adaptive_scheduling \
+  --structure_epochs 40 \
+  --boundary_epochs 70 \
+  --schedule_start_epoch 10 \
+  --use_class_weights
+
+# Adaptive Complexity Cascade
+!python /kaggle/working/SwinUNETRV2/kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 100 \
+  --batch_size 1 \
+  --loss_type adaptive_complexity_cascade \
+  --learning_rate 1e-4 \
+  --use_adaptive_scheduling \
+  --adaptive_schedule_type linear \
+  --use_class_weights
+
+# Adaptive Dynamic Hybrid (Performance-based)
+!python /kaggle/working/SwinUNETRV2/kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 100 \
+  --batch_size 1 \
+  --loss_type adaptive_dynamic_hybrid \
+  --learning_rate 1e-4 \
+  --use_adaptive_scheduling \
+  --schedule_start_epoch 20 \
+  --use_class_weights
+
+# Warm Restarts for Local Minima Escape
+!python /kaggle/working/SwinUNETRV2/kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 100 \
+  --batch_size 1 \
+  --loss_type generalized_dice_focal \
+  --learning_rate 1e-4 \
+  --use_warm_restarts \
+  --restart_period 25 \
+  --restart_mult 1 \
+  --use_class_weights
+
+# Adaptive + Warm Restarts (SOTA Combination)
+!python /kaggle/working/SwinUNETRV2/kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 120 \
+  --batch_size 1 \
+  --loss_type adaptive_progressive_hybrid \
+  --learning_rate 1e-4 \
+  --use_adaptive_scheduling \
+  --structure_epochs 40 \
+  --boundary_epochs 70 \
+  --use_warm_restarts \
+  --restart_period 30 \
+  --use_class_weights
 
 # Alternative: Memory-optimized for smaller GPU
 !python kaggle_run.py \
@@ -206,10 +296,24 @@ args = argparse.Namespace(
     lambda_focal=cli_args.lambda_focal,
     lambda_tversky=cli_args.lambda_tversky,
     lambda_hausdorff=cli_args.lambda_hausdorff,
+    
+    # Adaptive loss scheduling parameters
+    use_adaptive_scheduling=cli_args.use_adaptive_scheduling,
+    adaptive_schedule_type=cli_args.adaptive_schedule_type,
+    structure_epochs=cli_args.structure_epochs,
+    boundary_epochs=cli_args.boundary_epochs,
+    schedule_start_epoch=cli_args.schedule_start_epoch,
+    min_loss_weight=cli_args.min_loss_weight,
+    max_loss_weight=cli_args.max_loss_weight,
+    
+    # Warm restart parameters
+    use_warm_restarts=cli_args.use_warm_restarts,
+    restart_period=cli_args.restart_period,
+    restart_mult=cli_args.restart_mult,
 )
 
 # Print final configuration summary
-print("\n=== 🚀 OPTIMIZED SWINUNETR CONFIGURATION ===")
+print("\n=== 🚀 ADAPTIVE SWINUNETR CONFIGURATION ===")
 print(f"🎯 Batch size: {args.batch_size}")
 print(f"📐 Image size: {args.img_size}")
 print(f"⚡ Learning rate: {args.learning_rate}")
@@ -232,6 +336,17 @@ print(f"🔲 ROI size: {args.roi_size}")
 print(f"⏹️ Early stop patience: {args.early_stopping_patience}")
 print(f"🔢 Limit val batches: {args.limit_val_batches}")
 print(f"📅 Val interval: {args.val_interval}")
+print(f"🔄 Adaptive scheduling: {args.use_adaptive_scheduling}")
+if args.use_adaptive_scheduling:
+    print(f"📈 Schedule type: {args.adaptive_schedule_type}")
+    print(f"🏗️ Structure epochs: {args.structure_epochs}")
+    print(f"🎯 Boundary epochs: {args.boundary_epochs}")
+    print(f"🚀 Schedule start: {args.schedule_start_epoch}")
+    print(f"⚖️ Weight range: {args.min_loss_weight} - {args.max_loss_weight}")
+print(f"🔥 Warm restarts: {args.use_warm_restarts}")
+if args.use_warm_restarts:
+    print(f"🔄 Restart period: {args.restart_period} epochs")
+    print(f"📊 Restart multiplier: {args.restart_mult}")
 
 def run_with_error_handling():
     """Run training with comprehensive error handling"""

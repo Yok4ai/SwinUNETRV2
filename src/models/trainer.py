@@ -81,6 +81,18 @@ def setup_training(train_loader, val_loader, args):
         lambda_focal=getattr(args, 'lambda_focal', 1.0),
         lambda_tversky=getattr(args, 'lambda_tversky', 1.0),
         lambda_hausdorff=getattr(args, 'lambda_hausdorff', 1.0),
+        # Adaptive loss scheduling parameters
+        use_adaptive_scheduling=getattr(args, 'use_adaptive_scheduling', False),
+        adaptive_schedule_type=getattr(args, 'adaptive_schedule_type', 'linear'),
+        structure_epochs=getattr(args, 'structure_epochs', 30),
+        boundary_epochs=getattr(args, 'boundary_epochs', 50),
+        schedule_start_epoch=getattr(args, 'schedule_start_epoch', 10),
+        min_loss_weight=getattr(args, 'min_loss_weight', 0.1),
+        max_loss_weight=getattr(args, 'max_loss_weight', 2.0),
+        # Warm restart parameters
+        use_warm_restarts=getattr(args, 'use_warm_restarts', False),
+        restart_period=getattr(args, 'restart_period', 20),
+        restart_mult=getattr(args, 'restart_mult', 1),
     )
 
     # Setup trainer

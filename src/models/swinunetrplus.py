@@ -316,8 +316,8 @@ class EnhancedSwinTransformerBlock(SwinTransformerBlock):
         act_layer: str = "GELU",
         norm_layer: type[LayerNorm] = nn.LayerNorm,
         use_checkpoint: bool = False,
-        use_multi_scale_attention: bool = False,
-        use_adaptive_window: bool = False,
+        use_multi_scale_attention: bool = True,
+        use_adaptive_window: bool = True,
         multi_scale_window_sizes: List[int] = [7, 5, 3],
     ):
         super().__init__(
@@ -378,8 +378,8 @@ class EnhancedBasicLayer(BasicLayer):
         norm_layer: type[LayerNorm] = nn.LayerNorm,
         downsample: nn.Module | None = None,
         use_checkpoint: bool = False,
-        use_multi_scale_attention: bool = False,
-        use_adaptive_window: bool = False,
+        use_multi_scale_attention: bool = True,
+        use_adaptive_window: bool = True,
         multi_scale_window_sizes: List[int] = [7, 5, 3],
     ):
         # Initialize parent with modified blocks
@@ -433,10 +433,10 @@ class EnhancedSwinTransformer(SwinTransformer):
         use_checkpoint: bool = False,
         spatial_dims: int = 3,
         downsample="merging",
-        use_v2=False,
-        use_multi_scale_attention: bool = False,
-        use_adaptive_window: bool = False,
-        use_enhanced_v2_blocks: bool = False,
+        use_v2=True,
+        use_multi_scale_attention: bool = True,
+        use_adaptive_window: bool = True,
+        use_enhanced_v2_blocks: bool = True,
         multi_scale_window_sizes: List[int] = [7, 5, 3],
     ):
         super().__init__(
