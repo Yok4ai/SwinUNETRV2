@@ -68,7 +68,7 @@ class BrainTumorSegmentation(pl.LightningModule):
                  loss_type='hybrid',
                  use_modality_attention=False,
                  overlap=0.7,
-                 class_weights=(1.0, 3.0, 5.0),
+                 class_weights=(3.0, 1.0, 5.0),
                  dice_ce_weight=0.6,
                  focal_weight=0.4,
                  threshold=0.5,
@@ -102,7 +102,7 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Class weights based on BraTS imbalance: ET (most rare) > TC > WT
         if self.hparams.use_class_weights:
             # Higher weights for more imbalanced classes
-            class_weights = torch.tensor(list(self.hparams.class_weights))  # Background, WT, TC, ET
+            class_weights = torch.tensor(list(self.hparams.class_weights))  # TC, WT, ET
         else:
             class_weights = None
             
