@@ -1,6 +1,6 @@
-# SwinUNETR V2
+# SwinUNETR++
 
-A PyTorch implementation of SwinUNETR V2 for medical image segmentation.
+An advanced PyTorch implementation of SwinUNETR++ for brain tumor segmentation with comprehensive loss function optimization, adaptive scheduling, and local minima escape strategies.
 
 ## Installation
 
@@ -39,18 +39,41 @@ cd SwinUNETRV2
 pip install -e .
 ```
 
+## 🎯 Key Features
+
+### Advanced Loss Functions (14 Total)
+- **Basic**: Dice, DiceCE, DiceFocal, Generalized Dice, Focal, Tversky, Hausdorff
+- **Hybrid**: GDL+Focal+Tversky, Dice+Hausdorff combinations
+- **Adaptive**: Structure-boundary scheduling, progressive hybrid, complexity cascade, dynamic performance-based
+- **Local Minima Escape**: Warm restarts and plateau detection
+
+### SOTA Optimization
+- **Adaptive Scheduling**: Automatic curriculum learning with configurable phase transitions
+- **Dynamic Loss Weighting**: Performance-based adaptation during training
+- **Multiple Schedule Types**: Linear, exponential, cosine weight transitions
+- **BraTS Specialized**: Optimized for brain tumor segmentation challenges
+
+### Easy CLI Interface
+- **30+ Parameters**: Comprehensive configuration options
+- **Quick Start to Competition**: From simple Dice to SOTA adaptive strategies
+- **Example Commands**: Documented usage patterns for all scenarios
+
 ## Project Structure
 
 ```
-SWINUNETRV2
+SwinUNETR++
 ├── src/
-│     ├── models/         # Model architecture
-│     ├── data/          # Data loading and augmentation
-│     ├── utils/         # Utility functions
-├── setup.py              # Package setup file
-├── kaggle_run.py         # Main entry point for training (use this script)
-├── main.py
-└── requirements.txt      # Project dependencies
+│     ├── models/         # Enhanced model architecture with adaptive losses
+│     ├── data/          # Data loading and augmentation (BraTS 2021/2023)
+│     ├── utils/         # Visualization and utility functions
+├── docs/                 # Comprehensive documentation
+│     ├── loss.md        # ⭐ Complete loss function guide
+│     ├── architecture.md # Pipeline architecture overview
+│     └── ...            # Additional documentation
+├── kaggle_run.py         # Main CLI entry point (30+ parameters)
+├── main.py              # Core training orchestration
+├── setup.py             # Package setup
+└── requirements.txt     # Dependencies
 ```
 
 ## Execution Flow
@@ -70,36 +93,83 @@ The training pipeline is orchestrated as follows:
       4. **Training**: Calls `train_model` from `src/models/trainer.py` to start the training loop, validation, and checkpointing.
 
 3. **Model Details**:
-    - The SwinUNETR model is defined in `src/models/swinunetr.py` and wrapped by `BrainTumorSegmentation` in `src/models/pipeline.py` for training, validation, and logging.
-    - Training and validation metrics, early stopping, and checkpointing are handled by PyTorch Lightning.
+    - The SwinUNETR++ model is defined in `src/models/swinunetr.py` with enhanced features in `swinunetrplus.py` 
+    - Wrapped by `BrainTumorSegmentation` in `src/models/pipeline.py` with 14 loss functions and adaptive scheduling
+    - Advanced optimization with warm restarts, plateau detection, and automatic curriculum learning
 
 **Summary:**
 - Edit parameters in `kaggle_run.py`.
 - Run `kaggle_run.py` (on Kaggle or locally).
 - The script will handle all steps: data transforms, loading, model setup, and training.
 
-## Usage
+## 🚀 Quick Start
+
+### Choose Your Loss Function Strategy
+
+1. **Beginners**: Start with `dicece`
+```bash
+python kaggle_run.py --loss_type dicece --use_class_weights
+```
+
+2. **Standard Use**: `generalized_dice_focal`
+```bash
+python kaggle_run.py --loss_type generalized_dice_focal --gdl_lambda 1.0 --lambda_focal 0.5
+```
+
+3. **Competition/Research**: `adaptive_progressive_hybrid`
+```bash
+python kaggle_run.py --loss_type adaptive_progressive_hybrid \
+  --use_adaptive_scheduling --structure_epochs 40 --boundary_epochs 70 \
+  --use_warm_restarts --restart_period 30
+```
 
 ### Running on Kaggle
 
 1. Install the package (see above).
-2. Run the training script:
+2. Run with your chosen strategy:
 
 ```python
-!python ./SwinUNETRV2/kaggle_run.py
+!python ./SwinUNETRV2/kaggle_run.py --loss_type generalized_dice_focal --use_class_weights
 ```
 
-This will use the optimized configuration in `kaggle_run.py` for training.
+## Usage
 
-#### Customizing Parameters
+### Advanced Configuration
 
-You can customize the training, model, and data parameters by editing the `args` block in `kaggle_run.py`. The parameters are grouped as follows:
+SwinUNETR++ offers 30+ CLI parameters for comprehensive customization:
 
-- **Data parameters**: `input_dir`, `batch_size`, `num_workers`, `pin_memory`, `persistent_workers`
-- **Model parameters**: `img_size`, `in_channels`, `out_channels`, `feature_size`, `depths`, `num_heads`, `downsample`, `use_v2`
-- **Training parameters**: `learning_rate`, `weight_decay`, `epochs`, `accelerator`, `devices`, `precision`, `strategy`, `log_every_n_steps`, `enable_checkpointing`, `benchmark`, `profiler`, `use_amp`, `gradient_clip_val`
-- **Validation settings**: `val_interval`, `save_interval`, `early_stopping_patience`, `limit_val_batches`
-- **Inference parameters**: `roi_size`, `sw_batch_size`, `overlap`
+#### Loss Function Options (14 total):
+```bash
+--loss_type dice|dicece|dicefocal|generalized_dice|generalized_dice_focal|
+           focal|tversky|hausdorff|hybrid_gdl_focal_tversky|hybrid_dice_hausdorff|
+           adaptive_structure_boundary|adaptive_progressive_hybrid|
+           adaptive_complexity_cascade|adaptive_dynamic_hybrid
+```
+
+#### Adaptive Scheduling:
+```bash
+--use_adaptive_scheduling  # Enable adaptive loss scheduling
+--adaptive_schedule_type linear|exponential|cosine
+--structure_epochs 30      # Focus on structure learning
+--boundary_epochs 50       # Focus on boundary refinement
+--min_loss_weight 0.1      # Minimum loss component weight
+--max_loss_weight 2.0      # Maximum loss component weight
+```
+
+#### Local Minima Escape:
+```bash
+--use_warm_restarts        # Enable warm restarts
+--restart_period 20        # Restart every N epochs
+--restart_mult 1           # Period multiplier
+```
+
+#### Loss-Specific Parameters:
+```bash
+--focal_gamma 2.0          # Focal loss focusing parameter
+--tversky_alpha 0.5        # Tversky precision/recall balance
+--hausdorff_alpha 2.0      # Hausdorff distance scaling
+--class_weights 3.0 1.0 5.0  # TC, WT, ET weights
+```
 
 To change a parameter, simply edit its value in the `argparse.Namespace` in `kaggle_run.py`. For example, to use a batch size of 8 and train for 20 epochs:
 
@@ -143,16 +213,36 @@ You can also import and use individual components:
 
 ```python
 from src.models.swinunetr import SwinUNETR
-from src.models.trainer import Trainer
+from src.models.pipeline import BrainTumorSegmentation
 
-# Initialize model
-model = SwinUNETR(...)
-
-# Train model
-trainer = Trainer(model, ...)
-trainer.train()
+# Initialize SwinUNETR++ with adaptive losses
+model = BrainTumorSegmentation(
+    train_loader=train_loader,
+    val_loader=val_loader,
+    loss_type='adaptive_progressive_hybrid',
+    use_adaptive_scheduling=True,
+    use_warm_restarts=True
+)
 ```
+
+## 📚 Documentation
+
+- **[docs/loss.md](docs/loss.md)** - ⭐ Complete loss function guide with SOTA strategies
+- **[docs/pipeline.md](docs/pipeline.md)** - Pipeline architecture overview
+- **[docs/README.md](docs/README.md)** - Documentation index
+
+## Advanced Features
+
+### BraTS Optimizations
+- **Class Imbalance Handling**: Specialized weights for TC/WT/ET regions
+- **Multi-Objective Training**: Balance volume accuracy and boundary quality
+- **Progressive Learning**: Curriculum from structure to fine details
+
+### Local Minima Escape
+- **Warm Restarts**: Periodic LR spikes to escape poor optima
+- **Plateau Detection**: Automatic identification of training stagnation
+- **Loss Switching**: Dynamic strategy adaptation during training
 
 ## License
 
-MIT License 
+MIT License
