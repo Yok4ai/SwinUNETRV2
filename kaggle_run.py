@@ -193,6 +193,19 @@ args = argparse.Namespace(
     sw_batch_size=1,
     overlap=cli_args.overlap,
     loss_type=cli_args.loss_type,
+    
+    # Loss function parameters
+    tversky_alpha=cli_args.tversky_alpha,
+    tversky_beta=cli_args.tversky_beta,
+    focal_gamma=cli_args.focal_gamma,
+    focal_alpha=cli_args.focal_alpha,
+    gdl_weight_type=cli_args.gdl_weight_type,
+    gdl_lambda=cli_args.gdl_lambda,
+    hausdorff_alpha=cli_args.hausdorff_alpha,
+    lambda_dice=cli_args.lambda_dice,
+    lambda_focal=cli_args.lambda_focal,
+    lambda_tversky=cli_args.lambda_tversky,
+    lambda_hausdorff=cli_args.lambda_hausdorff,
 )
 
 # Print final configuration summary
