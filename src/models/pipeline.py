@@ -3,7 +3,7 @@ import time
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
-from monai.losses import DiceLoss, DiceCELoss, FocalLoss
+from monai.losses import DiceLoss, DiceCELoss, FocalLoss, DiceFocalLoss, GeneralizedDiceLoss, GeneralizedDiceFocalLoss, TverskyLoss, HausdorffDTLoss
 from monai.metrics import DiceMetric, MeanIoU, HausdorffDistanceMetric
 from monai.transforms import Compose, Activations, AsDiscrete, RandFlipd
 from monai.data import PersistentDataset, list_data_collate, decollate_batch, DataLoader, load_decathlon_datalist, CacheDataset
@@ -65,12 +65,21 @@ class BrainTumorSegmentation(pl.LightningModule):
                  sw_batch_size=2, use_v2=True, depths=(2, 2, 2, 2),
                  num_heads=(3, 6, 12, 24), downsample="mergingv2",
                  use_class_weights=True,
-                 loss_type='hybrid',
+                 loss_type='dice',
+                 tversky_alpha=0.5,
+                 tversky_beta=0.5,
+                 focal_gamma=2.0,
+                 focal_alpha=None,
+                 gdl_weight_type='square',
+                 gdl_lambda=1.0,
+                 hausdorff_alpha=2.0,
+                 lambda_dice=1.0,
+                 lambda_focal=1.0,
+                 lambda_tversky=1.0,
+                 lambda_hausdorff=1.0,
                  use_modality_attention=False,
                  overlap=0.7,
                  class_weights=(3.0, 1.0, 5.0),
-                 dice_ce_weight=0.6,
-                 focal_weight=0.4,
                  threshold=0.5,
                  optimizer_betas=(0.9, 0.999),
                  optimizer_eps=1e-8,
@@ -108,17 +117,51 @@ class BrainTumorSegmentation(pl.LightningModule):
             
         # Loss functions with class weighting
         self.loss_type = loss_type
-
+        
+        # Standard loss functions
         self.dice_loss = DiceLoss(
             smooth_nr=0, smooth_dr=1e-5, squared_pred=True, 
-            to_onehot_y=False, sigmoid=True
+            to_onehot_y=False, sigmoid=True, weight=class_weights
         )
-        self.ce_loss = DiceCELoss(
+        
+        self.dicece_loss = DiceCELoss(
             smooth_nr=0, smooth_dr=1e-5, squared_pred=True, 
-            to_onehot_y=False, sigmoid=True
+            to_onehot_y=False, sigmoid=True, weight=class_weights,
+            lambda_dice=self.hparams.lambda_dice, lambda_ce=1.0
         )
+        
+        self.dicefocal_loss = DiceFocalLoss(
+            smooth_nr=0, smooth_dr=1e-5, squared_pred=True, 
+            to_onehot_y=False, sigmoid=True, weight=class_weights,
+            gamma=self.hparams.focal_gamma, alpha=self.hparams.focal_alpha,
+            lambda_dice=self.hparams.lambda_dice, lambda_focal=self.hparams.lambda_focal
+        )
+        
+        self.generalized_dice_loss = GeneralizedDiceLoss(
+            smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True,
+            w_type=self.hparams.gdl_weight_type
+        )
+        
+        self.generalized_dice_focal_loss = GeneralizedDiceFocalLoss(
+            smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True,
+            w_type=self.hparams.gdl_weight_type, weight=class_weights,
+            gamma=self.hparams.focal_gamma, 
+            lambda_gdl=self.hparams.gdl_lambda, lambda_focal=self.hparams.lambda_focal
+        )
+        
         self.focal_loss = FocalLoss(
-            gamma=2.0, weight=class_weights, reduction='mean'
+            gamma=self.hparams.focal_gamma, alpha=self.hparams.focal_alpha,
+            weight=class_weights, reduction='mean', to_onehot_y=False
+        )
+        
+        self.tversky_loss = TverskyLoss(
+            smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True,
+            alpha=self.hparams.tversky_alpha, beta=self.hparams.tversky_beta
+        )
+        
+        self.hausdorff_loss = HausdorffDTLoss(
+            alpha=self.hparams.hausdorff_alpha, include_background=False,
+            to_onehot_y=False, sigmoid=True
         )
         
         # Standard Dice Loss Metrics
@@ -156,14 +199,45 @@ class BrainTumorSegmentation(pl.LightningModule):
         return self.model(x)
 
     def compute_loss(self, outputs, labels):
-        """Compute loss based on loss_type: 'hybrid' (DiceCE+Focal) or 'dice' (Dice only)"""
-        if self.loss_type == 'hybrid':
-            dice_ce_loss = self.ce_loss(outputs, labels)
+        """Compute loss based on loss_type configuration"""
+        if self.loss_type == 'dice':
+            return self.dice_loss(outputs, labels)
+        elif self.loss_type == 'dicece':
+            return self.dicece_loss(outputs, labels)
+        elif self.loss_type == 'dicefocal':
+            return self.dicefocal_loss(outputs, labels)
+        elif self.loss_type == 'generalized_dice':
+            return self.generalized_dice_loss(outputs, labels)
+        elif self.loss_type == 'generalized_dice_focal':
+            return self.generalized_dice_focal_loss(outputs, labels)
+        elif self.loss_type == 'focal':
+            return self.focal_loss(outputs, labels)
+        elif self.loss_type == 'tversky':
+            return self.tversky_loss(outputs, labels)
+        elif self.loss_type == 'hausdorff':
+            return self.hausdorff_loss(outputs, labels)
+        elif self.loss_type == 'hybrid_gdl_focal_tversky':
+            # Generalized Dice + Focal + Tversky (controlled mix)
+            gdl_loss = self.generalized_dice_loss(outputs, labels)
             focal_loss = self.focal_loss(outputs, labels)
-            total_loss = self.hparams.dice_ce_weight * dice_ce_loss + self.hparams.focal_weight * focal_loss
+            tversky_loss = self.tversky_loss(outputs, labels)
+            total_loss = (
+                self.hparams.gdl_lambda * gdl_loss + 
+                self.hparams.lambda_focal * focal_loss + 
+                self.hparams.lambda_tversky * tversky_loss
+            )
+            return total_loss
+        elif self.loss_type == 'hybrid_dice_hausdorff':
+            # Dice + Hausdorff
+            dice_loss = self.dice_loss(outputs, labels)
+            hausdorff_loss = self.hausdorff_loss(outputs, labels)
+            total_loss = (
+                self.hparams.lambda_dice * dice_loss + 
+                self.hparams.lambda_hausdorff * hausdorff_loss
+            )
             return total_loss
         else:
-            return self.dice_loss(outputs, labels)
+            raise ValueError(f"Unknown loss_type: {self.loss_type}")
 
     def compute_metrics(self, outputs, labels):
         """Compute mean precision, recall, and F1 score for the batch."""

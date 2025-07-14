@@ -16,15 +16,30 @@ def parse_cli_args():
     parser.add_argument('--num_workers', type=int, default=3, help='Number of data loader workers')
     parser.add_argument('--img_size', type=int, default=96, help='Input image size')
     parser.add_argument('--feature_size', type=int, default=48, help='Model feature size')
-    parser.add_argument('--loss_type', type=str, default='hybrid', choices=['hybrid', 'dice'], help='Loss function: hybrid (DiceCE+Focal) or dice (Dice only)')
+    parser.add_argument('--loss_type', type=str, default='dice', 
+                        choices=['dice', 'dicece', 'dicefocal', 'generalized_dice', 'generalized_dice_focal', 
+                                'focal', 'tversky', 'hausdorff', 'hybrid_gdl_focal_tversky', 'hybrid_dice_hausdorff'], 
+                        help='Loss function type')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for optimizer')
     parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs for LR scheduler')
     parser.add_argument('--use_class_weights', action='store_true', help='Use class weights for loss (default: False)')
     parser.add_argument('--use_modality_attention', action='store_true', help='Enable Modality Attention module (default: False)')
     parser.add_argument('--overlap', type=float, default=0.7, help='Sliding window inference overlap (default: 0.7)')
     parser.add_argument('--class_weights', type=float, nargs=3, default=[3.0, 1.0, 5.0], help='Class weights for TC, WT, ET (default: 3.0 1.0 5.0)')
-    parser.add_argument('--dice_ce_weight', type=float, default=0.6, help='Weight for DiceCE loss in hybrid mode (default: 0.6)')
-    parser.add_argument('--focal_weight', type=float, default=0.4, help='Weight for Focal loss in hybrid mode (default: 0.4)')
+    # Removed dice_ce_weight and focal_weight - use lambda parameters instead
+    # New loss function parameters
+    parser.add_argument('--tversky_alpha', type=float, default=0.5, help='Tversky loss alpha parameter (default: 0.5)')
+    parser.add_argument('--tversky_beta', type=float, default=0.5, help='Tversky loss beta parameter (default: 0.5)')
+    parser.add_argument('--focal_gamma', type=float, default=2.0, help='Focal loss gamma parameter (default: 2.0)')
+    parser.add_argument('--focal_alpha', type=float, default=None, help='Focal loss alpha parameter (default: None)')
+    parser.add_argument('--gdl_weight_type', type=str, default='square', choices=['square', 'simple', 'uniform'], 
+                        help='Generalized Dice Loss weight type (default: square)')
+    parser.add_argument('--gdl_lambda', type=float, default=1.0, help='Generalized Dice Loss lambda parameter (default: 1.0)')
+    parser.add_argument('--hausdorff_alpha', type=float, default=2.0, help='Hausdorff loss alpha parameter (default: 2.0)')
+    parser.add_argument('--lambda_dice', type=float, default=1.0, help='Lambda weight for Dice loss component (default: 1.0)')
+    parser.add_argument('--lambda_focal', type=float, default=1.0, help='Lambda weight for Focal loss component (default: 1.0)')
+    parser.add_argument('--lambda_tversky', type=float, default=1.0, help='Lambda weight for Tversky loss component (default: 1.0)')
+    parser.add_argument('--lambda_hausdorff', type=float, default=1.0, help='Lambda weight for Hausdorff loss component (default: 1.0)')
     parser.add_argument('--threshold', type=float, default=0.5, help='Threshold for post-processing discrete output (default: 0.5)')
     parser.add_argument('--roi_size', type=int, nargs=3, default=[96, 96, 96], help='ROI size for sliding window inference (default: 96 96 96)')
     parser.add_argument('--early_stopping_patience', type=int, default=15, help='Early stopping patience epochs (default: 15)')
@@ -35,28 +50,59 @@ def parse_cli_args():
 cli_args = parse_cli_args()
 
 """
-## Example usage - Optimal settings for 50 epochs to beat baseline:
+## Example usage - Multiple loss function options:
+
+# Standard Dice Loss
 !python /kaggle/working/SwinUNETRV2/kaggle_run.py \
   --dataset brats2023 \
   --epochs 50 \
   --batch_size 1 \
-  --num_workers 3 \
-  --img_size 128 \
-  --feature_size 48 \
-  --roi_size 128 128 128 \
-  --overlap 0.7 \
-  --loss_type hybrid \
+  --loss_type dice \
   --learning_rate 5e-4 \
-  --warmup_epochs 5 \
-  --early_stopping_patience 8 \
-  --limit_val_batches 3 \
-  --val_interval 1 \
-  --class_weights 4.0 1.0 6.0 \
-  --dice_ce_weight 0.7 \
-  --focal_weight 0.3 \
-  --threshold 0.5 \
   --use_class_weights \
-  --use_modality_attention
+  --class_weights 4.0 1.0 6.0
+
+# DiceFocal Loss
+!python /kaggle/working/SwinUNETRV2/kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 50 \
+  --batch_size 1 \
+  --loss_type dicefocal \
+  --learning_rate 5e-4 \
+  --focal_gamma 2.0 \
+  --lambda_dice 1.0 \
+  --lambda_focal 1.0 \
+  --use_class_weights \
+  --class_weights 4.0 1.0 6.0
+
+# Hybrid: Generalized Dice + Focal + Tversky
+!python /kaggle/working/SwinUNETRV2/kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 50 \
+  --batch_size 1 \
+  --loss_type hybrid_gdl_focal_tversky \
+  --learning_rate 5e-4 \
+  --gdl_lambda 1.0 \
+  --lambda_focal 0.5 \
+  --lambda_tversky 0.3 \
+  --focal_gamma 2.0 \
+  --tversky_alpha 0.3 \
+  --tversky_beta 0.7 \
+  --use_class_weights \
+  --class_weights 4.0 1.0 6.0
+
+# Hybrid: Dice + Hausdorff
+!python /kaggle/working/SwinUNETRV2/kaggle_run.py \
+  --dataset brats2023 \
+  --epochs 50 \
+  --batch_size 1 \
+  --loss_type hybrid_dice_hausdorff \
+  --learning_rate 5e-4 \
+  --lambda_dice 1.0 \
+  --lambda_hausdorff 0.1 \
+  --hausdorff_alpha 2.0 \
+  --use_class_weights \
+  --class_weights 4.0 1.0 6.0
 
 # Alternative: Memory-optimized for smaller GPU
 !python kaggle_run.py \
@@ -132,8 +178,6 @@ args = argparse.Namespace(
     
     # Loss and training configuration
     class_weights=tuple(cli_args.class_weights),  # TC, WT, ET
-    dice_ce_weight=cli_args.dice_ce_weight,
-    focal_weight=cli_args.focal_weight,
     threshold=cli_args.threshold,
     optimizer_betas=(0.9, 0.999),
     optimizer_eps=1e-8,
@@ -164,7 +208,12 @@ print(f"🗂️ Dataset: {args.dataset}")
 print(f"🏋️ Use class weights: {args.use_class_weights}")
 print(f"🧠 Use modality attention: {args.use_modality_attention}")
 print(f"⚖️ Class weights: {args.class_weights}")
-print(f"🎯 DiceCE weight: {args.dice_ce_weight}, Focal weight: {args.focal_weight}")
+# Removed dice_ce_weight and focal_weight - using lambda parameters instead
+print(f"🎛️ Tversky α: {args.tversky_alpha}, β: {args.tversky_beta}")
+print(f"🎯 Focal γ: {args.focal_gamma}, α: {args.focal_alpha}")
+print(f"🏗️ GDL weight type: {args.gdl_weight_type}, λ: {args.gdl_lambda}")
+print(f"📏 Hausdorff α: {args.hausdorff_alpha}")
+print(f"⚖️ Loss weights - Dice: {args.lambda_dice}, Focal: {args.lambda_focal}, Tversky: {args.lambda_tversky}, Hausdorff: {args.lambda_hausdorff}")
 print(f"🎚️ Threshold: {args.threshold}")
 print(f"🔲 ROI size: {args.roi_size}")
 print(f"⏹️ Early stop patience: {args.early_stopping_patience}")
