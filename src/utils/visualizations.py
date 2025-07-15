@@ -126,7 +126,15 @@ class ComprehensiveVisualizer:
     def create_gradcam_visualizations(self, image, target_layers=None, class_idx=None):
         """Create GradCAM and GradCAM++ visualizations."""
         if target_layers is None:
-            target_layers = ["encoder1.layer.norm3", "encoder2.layer.norm3", "encoder3.layer.norm3"]
+            # Updated for SwinUNETR V2 architecture
+            target_layers = [
+                "encoder1",     # First encoder block
+                "encoder2",     # Second encoder block  
+                "encoder3",     # Third encoder block
+                "encoder4",     # Fourth encoder block
+                "decoder2",     # Decoder block
+                "decoder1"      # Final decoder block
+            ]
         
         results = {}
         
@@ -479,7 +487,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default="./visualizations",
                        help="Output directory for visualizations")
     parser.add_argument("--gradcam_layers", type=str, nargs="+", 
-                       default=["encoder1.layer.norm3", "encoder2.layer.norm3", "encoder3.layer.norm3"],
+                       default=["encoder1", "encoder2", "encoder3", "encoder4"],
                        help="Layers for GradCAM visualization")
     parser.add_argument("--quick_mode", action="store_true",
                        help="Run only essential visualizations (faster)")
@@ -596,7 +604,7 @@ def comprehensive_visualization(model, image, output_dir="./visualizations"):
     
     # 2. GradCAM visualizations
     print("🔥 Creating GradCAM visualizations...")
-    target_layers = ["encoder1.layer.norm3", "encoder2.layer.norm3", "encoder3.layer.norm3"]
+    target_layers = ["encoder1", "encoder2", "encoder3", "encoder4"]
     cam_maps = {}
     
     for layer in target_layers:
