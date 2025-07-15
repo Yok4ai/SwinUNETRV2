@@ -3,6 +3,11 @@
 Visualization module for SwinUNETR V2 brain tumor segmentation model.
 Provides attention rollout and GradCAM visualizations for model interpretability.
 
+---
+### Note on Memory Usage for Visualizations
+Due to the high memory requirements of transformer-based 3D models, GradCAM and attention rollout visualizations are computed on a small patch or slice of the input volume, not the entire scan. This allows for meaningful interpretability without running out of GPU memory.
+---
+
 Usage:
     python visualizations.py --checkpoint_path /path/to/checkpoint.pth --sample_data_path /path/to/sample
     python visualizations.py --help
@@ -196,7 +201,7 @@ class AttentionRollout:
 class SwinUNETRVisualizer:
     """Main visualization class for SwinUNETR."""
     
-    def __init__(self, model_path: str, device: str = "cuda" if torch.cuda.is_available() else "cpu", roi_size=(96, 96, 96), sw_batch_size=1):
+    def __init__(self, model_path: str, device: str = "cuda" if torch.cuda.is_available() else "cpu", roi_size=(96, 96, 96), sw_batch_size=1, patch_size=(16, 96, 96)):
         """
         Initialize visualizer.
         
@@ -205,11 +210,13 @@ class SwinUNETRVisualizer:
             device: Device to run on
             roi_size: ROI size for sliding window inference
             sw_batch_size: Sliding window batch size
+            patch_size: Patch size for GradCAM/attention visualization
         """
         self.device = device
         self.model = self._load_model(model_path)
         self.roi_size = roi_size
         self.sw_batch_size = sw_batch_size
+        self.patch_size = patch_size
         
         # Initialize visualization tools
         target_layers = ["encoder4", "encoder3", "encoder2", "swinViT.layers4.0"]
@@ -433,55 +440,65 @@ class SwinUNETRVisualizer:
         # Make predictions
         predictions, probabilities = self.predict(input_tensor)
         
+        # --- Extract a center patch for GradCAM/attention to avoid OOM ---
+        B, C, D, H, W = input_tensor.shape
+        pd, ph, pw = self.patch_size
+        d0 = max(0, D//2 - pd//2)
+        h0 = max(0, H//2 - ph//2)
+        w0 = max(0, W//2 - pw//2)
+        d1 = min(D, d0 + pd)
+        h1 = min(H, h0 + ph)
+        w1 = min(W, w0 + pw)
+        center_patch = input_tensor[:, :, d0:d1, h0:h1, w0:w1]
+        
         # Generate visualizations for each class
         results = {}
         for class_idx in range(3):
             class_name = ['TC', 'WT', 'ET'][class_idx]
             
-            # GradCAM for different layers
+            # GradCAM for different layers (on patch)
             gradcam_maps = {}
             for layer_name in self.gradcam.target_layers:
                 if layer_name in self.gradcam.gradcams:
                     gradcam_maps[layer_name] = self.gradcam.generate_cam(
-                        input_tensor, class_idx, layer_name
+                        center_patch, class_idx, layer_name
                     )
             
-            # Attention rollout
-            attention = self.attention_rollout.generate_rollout(input_tensor)
+            # Attention rollout (on patch)
+            attention = self.attention_rollout.generate_rollout(center_patch)
             
-            # Occlusion sensitivity
+            # Occlusion sensitivity (on patch)
             try:
-                occ_map, _ = self.occlusion_sensitivity(input_tensor)
+                occ_map, _ = self.occlusion_sensitivity(center_patch)
                 occlusion = occ_map[0, :, :, :, class_idx].cpu()
             except Exception as e:
                 print(f"Warning: Could not compute occlusion sensitivity for {class_name}: {e}")
-                occlusion = torch.zeros_like(input_tensor[0, 0])
+                occlusion = torch.zeros_like(center_patch[0, 0])
             
             results[class_name] = {
                 'gradcam_maps': gradcam_maps,
                 'attention': attention,
                 'occlusion': occlusion,
-                'predictions': predictions[0, class_idx],
-                'probabilities': probabilities[0, class_idx]
+                'predictions': predictions[0, class_idx, d0:d1, h0:h1, w0:w1],
+                'probabilities': probabilities[0, class_idx, d0:d1, h0:h1, w0:w1]
             }
         
-        # Save visualizations for middle slices
-        depth = input_tensor.shape[4]
-        middle_slices = [depth // 4, depth // 2, 3 * depth // 4]
-        
+        # Save visualizations for middle slices (in patch)
+        patch_depth = d1 - d0
+        middle_slices = [patch_depth // 4, patch_depth // 2, 3 * patch_depth // 4]
         for slice_idx in middle_slices:
             for class_idx, class_name in enumerate(['TC', 'WT', 'ET']):
-                save_path = os.path.join(output_dir, f"{class_name}_slice_{slice_idx}.png")
+                save_path = os.path.join(output_dir, f"{class_name}_patch_slice_{slice_idx}.png")
                 self.visualize_slice_comprehensive(
-                    input_tensor, 
-                    predictions,
+                    center_patch, 
+                    predictions[:, :, d0:d1, h0:h1, w0:w1],
                     results[class_name],
                     slice_idx,
                     save_path
                 )
         
-        # Generate 3D visualizations using MONAI's matshow3d
-        self.generate_3d_visualizations(input_tensor, results, output_dir)
+        # Generate 3D visualizations using MONAI's matshow3d (on patch)
+        self.generate_3d_visualizations(center_patch, results, output_dir)
         
         return results
     
