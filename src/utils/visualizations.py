@@ -17,9 +17,9 @@ from kaggle_setup import prepare_brats_data
 
 set_determinism(42)
 
-def load_testing_datalist(path, max_samples=40):
+def load_datalist(path, max_samples=40):
     with open(path) as f:
-        return json.load(f)["testing"][:max_samples]
+        return json.load(f)["training"][:max_samples]
 
 def build_model(img_size, in_channels, out_channels, feature_size, use_v2=True):
     return SwinUNETR(
@@ -76,7 +76,7 @@ def run_gradcam(
     target_layer="encoder1"
 ):
     # Load datalist
-    datalist = load_testing_datalist(dataset_path)
+    datalist = load_datalist(dataset_path)
     # Use project-specific transforms
     train_tfms, val_tfms = get_transforms(img_size=96)  # Use val_tfms for test
     from monai.data import Dataset, DataLoader
