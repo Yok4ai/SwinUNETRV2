@@ -52,7 +52,9 @@ def resize_cam(cam, target_shape):
     cam = F.interpolate(cam, size=target_shape, mode="trilinear", align_corners=False)
     return normalize(cam)
 
-def show_cam_overlay(image, cam, title, channel_idx=3, channel_name="T2", save_path=None):
+def show_cam_overlay(image, cam, title, channel_idx=3, save_path=None):
+    channel_names = ["T1c", "T1n", "T2f", "T2w"]
+    channel_name = channel_names[channel_idx] if 0 <= channel_idx < len(channel_names) else f"Channel {channel_idx}"
     mid = image.shape[2] // 2
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
@@ -80,8 +82,7 @@ def run_gradcam(
     target_class=1,
     target_layer="encoder1",
     output_dir=".",
-    channel_idx=3,
-    channel_name="T2"
+    channel_idx=3
 ):
     # Load datalist
     datalist = load_datalist(dataset_path)
@@ -115,8 +116,8 @@ def run_gradcam(
     cam_np = cam[0].cpu().numpy()
     class_names = ["Tumor Core", "Whole Tumor", "Enhancing Tumor"]
     os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, f"gradcam_sample{sample_idx}_class{target_class}_layer{target_layer}.png")
-    show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}", channel_idx=channel_idx, channel_name=channel_name, save_path=save_path)
+    save_path = os.path.join(output_dir, f"gradcam_sample{sample_idx}_class{target_class}_layer{target_layer}_channel{channel_idx}.png")
+    show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}", channel_idx=channel_idx, save_path=save_path)
     return input_np, cam_np
 
 def main():
@@ -130,8 +131,7 @@ def main():
     parser.add_argument("--input_dir", type=str, help="Input directory with subject folders (for --prepare_json)")
     parser.add_argument("--output_dir", type=str, default="/kaggle/working/visualizations", help="Output directory for dataset.json (for --prepare_json) and GradCAM outputs")
     parser.add_argument("--dataset_type", type=str, default="brats2023", choices=["brats2021", "brats2023"], help="Dataset type (for --prepare_json)")
-    parser.add_argument("--channel_idx", type=int, default=3, help="Image channel index to visualize (default: 3 for T2)")
-    parser.add_argument("--channel_name", type=str, default="T2", help="Name of the channel to display in the plot title")
+    parser.add_argument("--channel_idx", type=int, default=3, help="Image channel index to visualize (0=T1c, 1=T1n, 2=T2f, 3=T2w)")
     args = parser.parse_args()
 
     dataset_json_path = args.dataset_path
@@ -152,8 +152,7 @@ def main():
         target_class=args.targetclass,
         target_layer=args.target_layer,
         output_dir=args.output_dir,
-        channel_idx=args.channel_idx,
-        channel_name=args.channel_name
+        channel_idx=args.channel_idx
     )
 
 if __name__ == "__main__":
