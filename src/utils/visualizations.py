@@ -78,7 +78,10 @@ def run_gradcam(
     checkpoint_path,
     sample_idx=0,
     target_class=1,
-    target_layer="encoder1"
+    target_layer="encoder1",
+    output_dir=".",
+    channel_idx=3,
+    channel_name="T2"
 ):
     # Load datalist
     datalist = load_datalist(dataset_path)
@@ -111,8 +114,9 @@ def run_gradcam(
     input_np = image[0].cpu().numpy()
     cam_np = cam[0].cpu().numpy()
     class_names = ["Tumor Core", "Whole Tumor", "Enhancing Tumor"]
-    save_path = f"gradcam_sample{sample_idx}_class{target_class}_layer{target_layer}.png"
-    show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}", save_path=save_path)
+    os.makedirs(output_dir, exist_ok=True)
+    save_path = os.path.join(output_dir, f"gradcam_sample{sample_idx}_class{target_class}_layer{target_layer}.png")
+    show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}", channel_idx=channel_idx, channel_name=channel_name, save_path=save_path)
     return input_np, cam_np
 
 def main():
@@ -124,8 +128,10 @@ def main():
     parser.add_argument("--sample_idx", type=int, default=0, help="Sample index to visualize")
     parser.add_argument("--prepare_json", action="store_true", help="If set, create dataset.json using prepare_brats_data before running GradCAM.")
     parser.add_argument("--input_dir", type=str, help="Input directory with subject folders (for --prepare_json)")
-    parser.add_argument("--output_dir", type=str, default="/kaggle/working", help="Output directory for dataset.json (for --prepare_json)")
+    parser.add_argument("--output_dir", type=str, default="/kaggle/working/visualizations", help="Output directory for dataset.json (for --prepare_json) and GradCAM outputs")
     parser.add_argument("--dataset_type", type=str, default="brats2023", choices=["brats2021", "brats2023"], help="Dataset type (for --prepare_json)")
+    parser.add_argument("--channel_idx", type=int, default=3, help="Image channel index to visualize (default: 3 for T2)")
+    parser.add_argument("--channel_name", type=str, default="T2", help="Name of the channel to display in the plot title")
     args = parser.parse_args()
 
     dataset_json_path = args.dataset_path
@@ -144,7 +150,10 @@ def main():
         checkpoint_path=args.checkpoint_path,
         sample_idx=args.sample_idx,
         target_class=args.targetclass,
-        target_layer=args.target_layer
+        target_layer=args.target_layer,
+        output_dir=args.output_dir,
+        channel_idx=args.channel_idx,
+        channel_name=args.channel_name
     )
 
 if __name__ == "__main__":
