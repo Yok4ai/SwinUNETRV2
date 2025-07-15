@@ -52,7 +52,7 @@ def resize_cam(cam, target_shape):
     cam = F.interpolate(cam, size=target_shape, mode="trilinear", align_corners=False)
     return normalize(cam)
 
-def show_cam_overlay(image, cam, title, channel_idx=3, channel_name="T2"):
+def show_cam_overlay(image, cam, title, channel_idx=3, channel_name="T2", save_path=None):
     mid = image.shape[2] // 2
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
@@ -66,7 +66,12 @@ def show_cam_overlay(image, cam, title, channel_idx=3, channel_name="T2"):
     plt.axis("off")
     plt.suptitle(title)
     plt.tight_layout()
-    plt.show()
+    if save_path:
+        plt.savefig(save_path)
+        print(f"[INFO] Saved Grad-CAM overlay to {save_path}")
+    else:
+        plt.show()
+    plt.close()
 
 def run_gradcam(
     dataset_path,
@@ -106,7 +111,8 @@ def run_gradcam(
     input_np = image[0].cpu().numpy()
     cam_np = cam[0].cpu().numpy()
     class_names = ["Tumor Core", "Whole Tumor", "Enhancing Tumor"]
-    show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}")
+    save_path = f"gradcam_sample{sample_idx}_class{target_class}_layer{target_layer}.png"
+    show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}", save_path=save_path)
     return input_np, cam_np
 
 def main():
