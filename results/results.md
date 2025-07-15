@@ -8,7 +8,7 @@
 | 2021-dicefocal | BraTS 2021 | dicefocal | 0.8693 | 0.8375 | 0.9350 | 0.8677 | 0.8059 | 28.0521 | 38 | batch_size=2, lr=1e-3, img_size=96, feature_size=48, warmup_epochs=15, epochs=50, use_class_weights=True, modality_attention=True |
 | 2021-gdl-focal-tversky | BraTS 2021 | hybrid_gdl_focal_tversky | 0.8656 | 0.8314 | 0.9337 | 0.8716 | 0.8048 | 24.4127 | 38 | batch_size=2, lr=5e-4, img_size=96, feature_size=48, roi_size=96x96x96, overlap=0.7, warmup_epochs=15, early_stopping_patience=10, modality_attention=True, class_weights=[3.0, 1.0, 5.0] |
 | 2021-dicece-focal | BraTS 2021 | dicece+focal | 0.8483 | 0.8223 | 0.8891 | 0.8446 | 0.7688 | 25.5657 | 14 | batch_size=2, lr=1e-3, img_size=96, feature_size=48, roi_size=96x96x96, overlap=0.7, warmup_epochs=10, epochs=50, early_stopping_patience=10, class_weights=[3.0, 1.0, 5.0], dice_ce_weight=0.5, focal_weight=0.5, use_class_weights=True, modality_attention=True |
-| 2021-dicefocal-128 | BraTS 2021 | dicefocal | 0.8271 | 0.7999 | 0.9071 | 0.8158 | 0.7476 | 12.5113 | 15 | batch_size=1, lr=5e-4, img_size=128, feature_size=48, roi_size=128x128x128, overlap=0.7, warmup_epochs=5, epochs=50, early_stopping_patience=8, class_weights=[1.0, 4.0, 6.0], dice_ce_weight=0.7, focal_weight=0.3, use_class_weights=True, modality_attention=True |
+| 2021-dicece-focal-128 | BraTS 2021 | dicefocal | 0.8271 | 0.7999 | 0.9071 | 0.8158 | 0.7476 | 12.5113 | 15 | batch_size=1, lr=5e-4, img_size=128, feature_size=48, roi_size=128x128x128, overlap=0.7, warmup_epochs=5, epochs=50, early_stopping_patience=8, class_weights=[1.0, 4.0, 6.0], dice_ce_weight=0.7, focal_weight=0.3, use_class_weights=True, modality_attention=True |
 
 ## BraTS 2023 Results
 
