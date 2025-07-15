@@ -6,7 +6,9 @@ import matplotlib.pyplot as plt
 import torch.nn.functional as F
 from monai.visualize import GradCAM
 from monai.utils.misc import set_determinism
-
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 # Project-specific imports
 from models.swinunetr import SwinUNETR
 from data.augmentations import get_transforms
