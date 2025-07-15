@@ -125,15 +125,13 @@ class AttentionRollout:
         self.attentions = []
         with torch.no_grad():
             _ = self.model(x)
-        result = None
-        for attn in self.attentions:
-            attn = attn.mean(dim=1)  # mean over heads
-            attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-6)
-            if result is None:
-                result = attn
-            else:
-                result = torch.matmul(result, attn)
-        return result
+        # Only use the first attention matrix (or pick a specific one)
+        if not self.attentions:
+            return None
+        attn = self.attentions[0]  # shape: [B, num_heads, N, N]
+        attn = attn.mean(dim=1)    # mean over heads
+        attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-6)
+        return attn
 
 def main():
     parser = argparse.ArgumentParser(description="Minimal SwinUNETR GradCAM & Attention Rollout")
