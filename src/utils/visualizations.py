@@ -60,7 +60,6 @@ def get_transforms():
 
 def build_model():
     return SwinUNETR(
-        img_size=(96, 96, 96),
         in_channels=4,
         out_channels=3,
         feature_size=48,
