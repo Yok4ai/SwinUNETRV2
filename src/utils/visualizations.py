@@ -201,7 +201,7 @@ def run_integrated_gradients(
         output = model(x)
         return output[:, target_class].sum().unsqueeze(0)
     ig = IntegratedGradients(forward_func)
-    attributions = ig.attribute(image, target=None, n_steps=8)
+    attributions = ig.attribute(image, target=None, n_steps=4)
     attributions = attributions.detach().cpu().numpy()[0]
     input_np = image[0].detach().cpu().numpy()
     mid = input_np.shape[2] // 2
