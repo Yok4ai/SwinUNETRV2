@@ -11,7 +11,7 @@ from monai.utils.misc import set_determinism
 from models.swinunetr import SwinUNETR
 from data.augmentations import get_transforms
 from data.dataloader import get_dataloaders
-from kaggle_setup import prepare_brats_data
+from ..kaggle_setup import prepare_brats_data
 
 set_determinism(42)
 
