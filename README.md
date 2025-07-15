@@ -68,7 +68,7 @@ SwinUNETR++
 │     ├── utils/         # Visualization and utility functions
 ├── docs/                 # Comprehensive documentation
 │     ├── loss.md        # ⭐ Complete loss function guide
-│     ├── architecture.md # Pipeline architecture overview
+│     ├── pipeline.md # Pipeline architecture overview
 │     └── ...            # Additional documentation
 ├── kaggle_run.py         # Main CLI entry point (30+ parameters)
 ├── main.py              # Core training orchestration
