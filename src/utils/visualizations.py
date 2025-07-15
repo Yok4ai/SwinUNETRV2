@@ -1,38 +1,42 @@
-#!/usr/bin/env python3
-"""
-Simplified visualization module for SwinUNETR V2 brain tumor segmentation model.
-Provides basic GradCAM visualization and prediction overlay.
-
-Usage:
-    python visualizations.py --checkpoint_path /path/to/checkpoint.pth --image_path /path/to/image
-"""
-
 import argparse
-import os
 import json
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
-from monai.networks.nets import SwinUNETR
 from monai.visualize import GradCAM
-import nibabel as nib
+from monai.utils.misc import set_determinism
 
-def build_model():
+# Project-specific imports
+from src.models.swinunetr import SwinUNETR
+from src.data.augmentations import get_transforms
+from src.data.dataloader import get_dataloaders
+from kaggle_setup import prepare_brats_data
+
+set_determinism(42)
+
+def load_testing_datalist(path, max_samples=40):
+    with open(path) as f:
+        return json.load(f)["testing"][:max_samples]
+
+def build_model(img_size, in_channels, out_channels, feature_size, use_v2=True):
     return SwinUNETR(
-        in_channels=4,
-        out_channels=3,
-        feature_size=48,
+        in_channels=in_channels,
+        out_channels=out_channels,
+        patch_size=2,
+        feature_size=feature_size,
         use_checkpoint=True,
-        use_v2=True,
+        use_v2=use_v2,
         spatial_dims=3,
-        depths=(2, 2, 2, 2),
-        num_heads=(3, 6, 12, 24),
     )
 
 def load_weights(model, path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.load_state_dict(torch.load(path, map_location=device))
+    checkpoint = torch.load(path, map_location=device)
+    if "state_dict" in checkpoint:
+        model.load_state_dict(checkpoint["state_dict"], strict=False)
+    else:
+        model.load_state_dict(checkpoint, strict=False)
     return model.eval().to(device), device
 
 def normalize(cam):
@@ -46,7 +50,7 @@ def resize_cam(cam, target_shape):
     cam = F.interpolate(cam, size=target_shape, mode="trilinear", align_corners=False)
     return normalize(cam)
 
-def show_cam_overlay(image, cam, title, channel_idx=3, channel_name="T2", save_path=None):
+def show_cam_overlay(image, cam, title, channel_idx=3, channel_name="T2"):
     mid = image.shape[2] // 2
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
@@ -60,71 +64,75 @@ def show_cam_overlay(image, cam, title, channel_idx=3, channel_name="T2", save_p
     plt.axis("off")
     plt.suptitle(title)
     plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path)
-    else:
-        plt.show()
-    plt.close()
-
-def load_image(image_path):
-    ext = os.path.splitext(image_path)[1]
-    if ext in [".nii", ".gz"]:
-        img = nib.load(image_path)
-        data = img.get_fdata()
-        if data.ndim == 4:
-            return torch.from_numpy(data).float()
-        else:
-            raise ValueError("Expected 4D image (C, H, W, D) for .nii/.nii.gz")
-    elif ext == ".pt":
-        data = torch.load(image_path)
-        if isinstance(data, torch.Tensor):
-            return data.float()
-        elif isinstance(data, dict) and "image" in data:
-            return data["image"].float()
-        else:
-            raise ValueError(".pt file must contain a tensor or dict with 'image' key")
-    elif ext == ".npy":
-        data = np.load(image_path)
-        return torch.from_numpy(data).float()
-    else:
-        raise ValueError(f"Unsupported image file extension: {ext}")
+    plt.show()
 
 def run_gradcam(
-    image_path,
+    dataset_path,
     checkpoint_path,
+    sample_idx=0,
     target_class=1,
-    output_dir="./visualizations"
+    target_layer="encoder1"
 ):
-    model = build_model()
+    # Load datalist
+    datalist = load_testing_datalist(dataset_path)
+    # Use project-specific transforms
+    train_tfms, val_tfms = get_transforms(img_size=96)  # Use val_tfms for test
+    from monai.data import Dataset, DataLoader
+    dataset = Dataset(data=datalist, transform=val_tfms)
+    loader = DataLoader(dataset, batch_size=1)
+
+    # Model
+    model = build_model(img_size=96, in_channels=4, out_channels=3, feature_size=24, use_v2=True)
     model, device = load_weights(model, checkpoint_path)
-    image = load_image(image_path)
-    if image.ndim == 4:
-        image = image.unsqueeze(0)  # [1, C, H, W, D]
-    image = image.to(device)
-    gradcam = GradCAM(nn_module=model, target_layers="encoder1.layer.norm3")
+
+    # Get sample
+    sample = dataset[sample_idx]
+    image = sample["image"].unsqueeze(0).to(device)
+
+    # GradCAM
+    gradcam = GradCAM(nn_module=model, target_layers=target_layer)
     cam_raw = gradcam(x=image, class_idx=target_class)
+
+    # Resize and Normalize CAM
     cam = resize_cam(cam_raw, image.shape[2:])
+
+    # Visualization
     input_np = image[0].cpu().numpy()
     cam_np = cam[0].cpu().numpy()
     class_names = ["Tumor Core", "Whole Tumor", "Enhancing Tumor"]
-    os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, f"gradcam_{os.path.basename(image_path)}_class{target_class}.png")
-    show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}", save_path=save_path)
-    print(f"Saved GradCAM visualization to {save_path}")
+    show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}")
     return input_np, cam_np
 
 def main():
-    parser = argparse.ArgumentParser(description="SwinUNETR GradCAM Visualization CLI (single image)")
-    parser.add_argument("--image_path", type=str, required=True, help="Path to a preprocessed .nii, .nii.gz, .pt or .npy image file (shape [C, H, W, D] or [1, C, H, W, D])")
-    parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to model checkpoint")
-    parser.add_argument("--target_class", type=int, default=1, help="Target class index for GradCAM visualization")
-    parser.add_argument("--output_dir", type=str, default="./visualizations", help="Output directory for visualizations")
+    parser = argparse.ArgumentParser(description="SwinUNETR V2 GradCAM Visualization")
+    parser.add_argument("--dataset_path", type=str, help="Path to dataset.json (will be created if --prepare_json is set)")
+    parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to model checkpoint (.pth)")
+    parser.add_argument("--targetclass", type=int, default=1, help="Target class index (0=TC, 1=WT, 2=ET)")
+    parser.add_argument("--target_layer", type=str, default="encoder1", help="Target layer for GradCAM (e.g., encoder1, encoder2, etc.)")
+    parser.add_argument("--sample_idx", type=int, default=0, help="Sample index to visualize")
+    parser.add_argument("--prepare_json", action="store_true", help="If set, create dataset.json using prepare_brats_data before running GradCAM.")
+    parser.add_argument("--input_dir", type=str, help="Input directory with subject folders (for --prepare_json)")
+    parser.add_argument("--output_dir", type=str, default="/kaggle/working", help="Output directory for dataset.json (for --prepare_json)")
+    parser.add_argument("--dataset_type", type=str, default="brats2023", choices=["brats2021", "brats2023"], help="Dataset type (for --prepare_json)")
     args = parser.parse_args()
+
+    dataset_json_path = args.dataset_path
+    if args.prepare_json:
+        if not args.input_dir:
+            raise ValueError("--input_dir must be specified when using --prepare_json.")
+        prepare_brats_data(args.input_dir, args.output_dir, args.dataset_type)
+        dataset_json_path = f"{args.output_dir}/dataset.json"
+        print(f"[INFO] Created dataset.json at {dataset_json_path}")
+
+    if not dataset_json_path:
+        raise ValueError("--dataset_path must be specified (or use --prepare_json to create it).")
+
     run_gradcam(
-        image_path=args.image_path,
+        dataset_path=dataset_json_path,
         checkpoint_path=args.checkpoint_path,
-        target_class=args.target_class,
-        output_dir=args.output_dir
+        sample_idx=args.sample_idx,
+        target_class=args.targetclass,
+        target_layer=args.target_layer
     )
 
 if __name__ == "__main__":
