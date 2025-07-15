@@ -213,7 +213,7 @@ def run_integrated_gradients(
     plt.subplot(1, 2, 2)
     plt.imshow(input_np[channel_idx, :, mid, :], cmap="gray")
     attr_norm = normalize_attr(attributions[channel_idx, :, mid, :])
-    plt.imshow(attr_norm, cmap=cmap, alpha=0.5)
+    plt.imshow(attr_norm, cmap=cmap, alpha=0.8)
     plt.title("Integrated Gradients Overlay")
     plt.axis("off")
     plt.tight_layout()
