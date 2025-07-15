@@ -378,7 +378,14 @@ class SwinUNETRVisualizer:
         """Generate and save all visualizations."""
         os.makedirs(output_dir, exist_ok=True)
         
-        # Get input slice for overlay
+        # Ensure input tensor has correct shape [B, C, D, H, W]
+        if input_tensor.dim() != 5:
+            raise ValueError(f"Expected 5D input tensor [B, C, D, H, W], got {input_tensor.dim()}D")
+        
+        if input_tensor.shape[1] != 4:
+            raise ValueError(f"Expected 4 input channels, got {input_tensor.shape[1]}")
+        
+        # Get input slice for overlay (use first modality)
         input_slice = input_tensor[0, 0, :, :, input_tensor.shape[4] // 2].cpu().numpy()
         
         # Generate GradCAM for all classes
@@ -482,6 +489,9 @@ def main():
         else:
             print("No sample data provided, using dummy data")
             input_tensor = torch.randn(1, 4, 96, 96, 96).to(args.device)
+        
+        print(f"Input tensor shape: {input_tensor.shape}")
+        print(f"Input tensor device: {input_tensor.device}")
         
         # Generate visualizations
         visualizer.save_visualizations(input_tensor, args.output_dir)
