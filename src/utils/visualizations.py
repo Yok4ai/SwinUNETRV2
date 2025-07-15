@@ -170,6 +170,11 @@ def run_saliency(
     plt.close()
     return input_np, attributions
 
+def normalize_attr(attr):
+    attr = np.abs(attr)
+    attr = (attr - np.min(attr)) / (np.max(attr) - np.min(attr) + 1e-8)
+    return attr
+
 def run_integrated_gradients(
     dataset_path,
     checkpoint_path,
@@ -206,7 +211,8 @@ def run_integrated_gradients(
     plt.axis("off")
     plt.subplot(1, 2, 2)
     plt.imshow(input_np[channel_idx, :, mid, :], cmap="gray")
-    plt.imshow(attributions[channel_idx, :, mid, :], cmap="hot", alpha=0.5)
+    attr_norm = normalize_attr(attributions[channel_idx, :, mid, :])
+    plt.imshow(attr_norm, cmap="hot", alpha=0.5)
     plt.title("Integrated Gradients Overlay")
     plt.axis("off")
     plt.tight_layout()
