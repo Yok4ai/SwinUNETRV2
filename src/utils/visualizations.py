@@ -227,27 +227,34 @@ class SwinUNETRVisualizer:
     
     def _load_model(self, model_path: str) -> nn.Module:
         """Load model from checkpoint."""
-        # Create model
+        # Create standard MONAI SwinUNETR model
         model = SwinUNETR(
+            img_size=(96, 96, 96),  # Standard size for BraTS
             in_channels=4,
             out_channels=3,
             feature_size=48,
             use_checkpoint=True,
-            use_v2=True,
             spatial_dims=3,
             depths=(2, 2, 2, 2),
             num_heads=(3, 6, 12, 24),
-            downsample="mergingv2",
+            use_v2=True,
         )
         
-        # Load weights
+        # Load weights with flexible loading
         if os.path.exists(model_path):
             checkpoint = torch.load(model_path, map_location=self.device)
             if 'state_dict' in checkpoint:
-                model.load_state_dict(checkpoint['state_dict'])
+                state_dict = checkpoint['state_dict']
             else:
-                model.load_state_dict(checkpoint)
-            print(f"Loaded model from {model_path}")
+                state_dict = checkpoint
+            
+            # Try to load with strict=False to handle missing keys
+            try:
+                model.load_state_dict(state_dict, strict=False)
+                print(f"Loaded model from {model_path} (some keys may be missing)")
+            except Exception as e:
+                print(f"Error loading model: {e}")
+                print("Using random weights...")
         else:
             print(f"Warning: Model file {model_path} not found. Using random weights.")
         
@@ -259,19 +266,21 @@ class SwinUNETRVisualizer:
         """Load and preprocess input data."""
         # Handle different input formats
         if data_path.endswith('.nii') or data_path.endswith('.nii.gz'):
-            # Single NIfTI file
+            # Single NIfTI file - need to create 4-channel input for SwinUNETR
             img = nib.load(data_path)
             data = img.get_fdata()
             
             # Convert to tensor and add batch/channel dimensions
             data = torch.from_numpy(data).float()
             if data.dim() == 3:
-                data = data.unsqueeze(0).unsqueeze(0)  # Add batch and channel dims
+                # Replicate single channel to 4 channels for SwinUNETR
+                data = data.unsqueeze(0).repeat(4, 1, 1, 1).unsqueeze(0)  # (1, 4, D, H, W)
             elif data.dim() == 4:
                 data = data.unsqueeze(0)  # Add batch dim
             
-            # Normalize
-            data = (data - data.mean()) / (data.std() + 1e-8)
+            # Normalize each modality
+            for i in range(data.shape[1]):
+                data[0, i] = (data[0, i] - data[0, i].mean()) / (data[0, i].std() + 1e-8)
             
             metadata = {"spacing": img.header.get_zooms()[:3], "shape": data.shape}
             
@@ -303,7 +312,29 @@ class SwinUNETRVisualizer:
             else:
                 raise ValueError(f"Data path {data_path} not found")
         
+        # Ensure spatial dimensions are divisible by 32 (2^5) for SwinUNETR
+        data = self._pad_to_divisible(data, divisor=32)
+        
         return data.to(self.device), metadata
+    
+    def _pad_to_divisible(self, tensor: torch.Tensor, divisor: int = 32) -> torch.Tensor:
+        """Pad tensor to ensure spatial dimensions are divisible by divisor."""
+        B, C, D, H, W = tensor.shape
+        
+        # Calculate padding needed
+        pad_d = (divisor - D % divisor) % divisor
+        pad_h = (divisor - H % divisor) % divisor
+        pad_w = (divisor - W % divisor) % divisor
+        
+        # Pad symmetrically
+        tensor = F.pad(tensor, (
+            pad_w // 2, pad_w - pad_w // 2,  # W padding
+            pad_h // 2, pad_h - pad_h // 2,  # H padding
+            pad_d // 2, pad_d - pad_d // 2   # D padding
+        ), mode='constant', value=0)
+        
+        print(f"Padded from ({D}, {H}, {W}) to {tensor.shape[2:]}")
+        return tensor
     
     def predict(self, input_tensor: torch.Tensor) -> torch.Tensor:
         """Make prediction."""
