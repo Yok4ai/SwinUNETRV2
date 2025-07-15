@@ -192,10 +192,8 @@ def run_smoothgrad(
     if image.shape[2:] != (96, 96, 96):
         image = F.interpolate(image, size=(96, 96, 96), mode="trilinear", align_corners=False)
     # SmoothGrad
-    def forward_func(x):
-        return model(x)[:, target_class].sum().unsqueeze(0)
-    smooth_grad = SmoothGrad(forward_func, stdev_spread=0.15, n_samples=25, magnitude=True, verbose=True)
-    attributions = smooth_grad(x=image)
+    smooth_grad = SmoothGrad(model, stdev_spread=0.15, n_samples=25, magnitude=True, verbose=True)
+    attributions = smooth_grad(x=image, class_idx=(target_class,))
     attributions = attributions.detach().cpu().numpy()[0]
     input_np = image[0].detach().cpu().numpy()
     mid = input_np.shape[2] // 2
