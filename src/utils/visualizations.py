@@ -63,7 +63,7 @@ def build_model():
         in_channels=4,
         out_channels=3,
         feature_size=48,
-        use_checkpoint=True
+        use_checkpoint=True,
         use_v2=True,
         spatial_dims=3,
         depths=(2, 2, 2, 2),
