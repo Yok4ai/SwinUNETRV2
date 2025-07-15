@@ -135,6 +135,7 @@ python kaggle_run.py --loss_type adaptive_progressive_hybrid \
 ## Usage
 
 > **📖 Note**: The examples below are just a basic overview. For comprehensive usage examples, detailed parameter explanations, and advanced configurations, check:
+> - **[docs/usage.md](docs/usage.md)** - ⭐ Complete usage guide with all CLI parameters
 > - **[kaggle_run.py](kaggle_run.py)** - Complete parameter definitions and example commands
 > - **[docs/loss.md](docs/loss.md)** - Detailed loss function guide with usage examples
 > - **[docs/pipeline.md](docs/pipeline.md)** - Complete pipeline documentation
