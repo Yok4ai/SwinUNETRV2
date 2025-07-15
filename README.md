@@ -218,7 +218,7 @@ python -m swinunetrv2.main \
 You can also import and use individual components:
 
 ```python
-from src.models.swinunetr import SwinUNETR
+from src.models.swinunetrplus import SwinUNETR
 from src.models.pipeline import BrainTumorSegmentation
 
 # Initialize SwinUNETR++ with adaptive losses
@@ -231,23 +231,38 @@ model = BrainTumorSegmentation(
 )
 ```
 
-## 📚 Documentation
-
-- **[docs/loss.md](docs/loss.md)** - ⭐ Complete loss function guide with SOTA strategies
-- **[docs/pipeline.md](docs/pipeline.md)** - Pipeline architecture overview
-- **[docs/README.md](docs/README.md)** - Documentation index
-
 ## Advanced Features
 
-### BraTS Optimizations
-- **Class Imbalance Handling**: Specialized weights for TC/WT/ET regions
-- **Multi-Objective Training**: Balance volume accuracy and boundary quality
-- **Progressive Learning**: Curriculum from structure to fine details
+### 🎯 Adaptive Loss Functions (4 Types)
+- **`adaptive_structure_boundary`**: Dynamic transition from structure (Dice) to boundary (Focal) learning
+- **`adaptive_progressive_hybrid`**: 3-phase curriculum: Dice → Dice+Focal → Dice+Focal+Hausdorff
+- **`adaptive_complexity_cascade`**: 4-stage cascading complexity introduction
+- **`adaptive_dynamic_hybrid`**: Performance-based adaptation using validation metrics
 
-### Local Minima Escape
-- **Warm Restarts**: Periodic LR spikes to escape poor optima
-- **Plateau Detection**: Automatic identification of training stagnation
-- **Loss Switching**: Dynamic strategy adaptation during training
+### 📈 Adaptive Scheduling System
+- **Schedule Types**: Linear, exponential, cosine weight transitions
+- **Phase Control**: Configurable structure/boundary epoch thresholds
+- **Weight Ranges**: Customizable min/max loss component weights
+- **Start Timing**: Delayed scheduling start for stable early training
+
+### 🔥 Local Minima Escape
+- **Warm Restarts**: Cosine annealing with periodic LR spikes (`--use_warm_restarts`)
+- **Restart Periods**: Configurable restart frequency and multipliers
+- **Adaptive Weights**: Dynamic loss component rebalancing during training
+- **Progressive Complexity**: Gradual introduction of sophisticated loss components
+
+### 🧠 Enhanced Model Features
+- **Modality Attention**: Cross-modal MRI feature enhancement (`--use_modality_attention`)
+- **Class Weighting**: Specialized TC/WT/ET region balancing (`--use_class_weights`)
+- **Sliding Window**: Configurable overlap for inference quality (`--overlap`)
+- **Post-processing**: Adjustable threshold for sensitivity/specificity balance (`--threshold`)
+
+### ⚙️ Advanced Training Parameters
+- **Mixed Precision**: 16-bit training for memory efficiency
+- **Gradient Clipping**: Stable training with large models
+- **Validation Control**: Configurable validation frequency and batch limits
+- **Early Stopping**: Patience-based training termination
+- **DDP Strategy**: Multi-GPU distributed training support
 
 ## License
 
