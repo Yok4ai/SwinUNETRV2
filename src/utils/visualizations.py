@@ -14,6 +14,7 @@ from models.swinunetr import SwinUNETR
 from data.augmentations import get_transforms
 from data.dataloader import get_dataloaders
 from kaggle_setup import prepare_brats_data
+from captum.attr import Saliency
 
 set_determinism(42)
 
@@ -120,18 +121,62 @@ def run_gradcam(
     show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}", channel_idx=channel_idx, save_path=save_path)
     return input_np, cam_np
 
+def run_saliency(
+    dataset_path,
+    checkpoint_path,
+    sample_idx=0,
+    target_class=1,
+    output_dir=".",
+    channel_idx=3
+):
+    datalist = load_datalist(dataset_path)
+    train_tfms, val_tfms = get_transforms(img_size=96)
+    from monai.data import Dataset
+    dataset = Dataset(data=datalist, transform=val_tfms)
+    model = build_model(img_size=96, in_channels=4, out_channels=3, feature_size=48, use_v2=True)
+    model, device = load_weights(model, checkpoint_path)
+    model.eval()
+    sample = dataset[sample_idx]
+    image = sample["image"].unsqueeze(0).to(device)
+    image.requires_grad = True
+    def forward_func(x):
+        return model(x)
+    saliency = Saliency(forward_func)
+    attributions = saliency.attribute(image, target=target_class)
+    attributions = attributions.detach().cpu().numpy()[0]
+    input_np = image[0].detach().cpu().numpy()
+    mid = input_np.shape[2] // 2
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.imshow(input_np[channel_idx, :, mid, :], cmap="gray")
+    plt.title("Original")
+    plt.axis("off")
+    plt.subplot(1, 2, 2)
+    plt.imshow(input_np[channel_idx, :, mid, :], cmap="gray")
+    plt.imshow(attributions[channel_idx, :, mid, :], cmap="hot", alpha=0.5)
+    plt.title("Saliency Overlay")
+    plt.axis("off")
+    plt.tight_layout()
+    os.makedirs(output_dir, exist_ok=True)
+    save_path = os.path.join(output_dir, f"saliency_sample{sample_idx}_class{target_class}_channel{channel_idx}.png")
+    plt.savefig(save_path)
+    print(f"[INFO] Saved saliency overlay to {save_path}")
+    plt.close()
+    return input_np, attributions
+
 def main():
-    parser = argparse.ArgumentParser(description="SwinUNETR V2 GradCAM Visualization")
+    parser = argparse.ArgumentParser(description="SwinUNETR V2 Visualization (GradCAM/Saliency)")
     parser.add_argument("--dataset_path", type=str, help="Path to dataset.json (will be created if --prepare_json is set)")
     parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to model checkpoint (.pth)")
     parser.add_argument("--targetclass", type=int, default=1, help="Target class index (0=TC, 1=WT, 2=ET)")
     parser.add_argument("--target_layer", type=str, default="encoder1", help="Target layer for GradCAM (e.g., encoder1, encoder2, etc.)")
     parser.add_argument("--sample_idx", type=int, default=0, help="Sample index to visualize")
-    parser.add_argument("--prepare_json", action="store_true", help="If set, create dataset.json using prepare_brats_data before running GradCAM.")
+    parser.add_argument("--prepare_json", action="store_true", help="If set, create dataset.json using prepare_brats_data before running visualization.")
     parser.add_argument("--input_dir", type=str, help="Input directory with subject folders (for --prepare_json)")
-    parser.add_argument("--output_dir", type=str, default="/kaggle/working/visualizations", help="Output directory for dataset.json (for --prepare_json) and GradCAM outputs")
+    parser.add_argument("--output_dir", type=str, default="/kaggle/working/visualizations", help="Output directory for dataset.json (for --prepare_json) and outputs")
     parser.add_argument("--dataset_type", type=str, default="brats2023", choices=["brats2021", "brats2023"], help="Dataset type (for --prepare_json)")
     parser.add_argument("--channel_idx", type=int, default=3, help="Image channel index to visualize (0=T1c, 1=T1n, 2=T2f, 3=T2w)")
+    parser.add_argument("--method", type=str, default="gradcam", choices=["gradcam", "saliency"], help="Visualization method: gradcam or saliency")
     args = parser.parse_args()
 
     dataset_json_path = args.dataset_path
@@ -145,15 +190,27 @@ def main():
     if not dataset_json_path:
         raise ValueError("--dataset_path must be specified (or use --prepare_json to create it).")
 
-    run_gradcam(
-        dataset_path=dataset_json_path,
-        checkpoint_path=args.checkpoint_path,
-        sample_idx=args.sample_idx,
-        target_class=args.targetclass,
-        target_layer=args.target_layer,
-        output_dir=args.output_dir,
-        channel_idx=args.channel_idx
-    )
+    if args.method == "gradcam":
+        run_gradcam(
+            dataset_path=dataset_json_path,
+            checkpoint_path=args.checkpoint_path,
+            sample_idx=args.sample_idx,
+            target_class=args.targetclass,
+            target_layer=args.target_layer,
+            output_dir=args.output_dir,
+            channel_idx=args.channel_idx
+        )
+    elif args.method == "saliency":
+        run_saliency(
+            dataset_path=dataset_json_path,
+            checkpoint_path=args.checkpoint_path,
+            sample_idx=args.sample_idx,
+            target_class=args.targetclass,
+            output_dir=args.output_dir,
+            channel_idx=args.channel_idx
+        )
+    else:
+        raise ValueError(f"Unknown visualization method: {args.method}")
 
 if __name__ == "__main__":
     main()

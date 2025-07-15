@@ -16,6 +16,7 @@ setup(
         "albumentations>=1.0.0",
         "opencv-python>=4.5.0",
         "tqdm>=4.50.0",
+        "captum>=0.6.0",
     ],
     python_requires=">=3.7",
     author="Imroz R",
