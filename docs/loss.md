@@ -2,6 +2,61 @@
 
 This document provides a detailed overview of all loss functions available in the SwinUNETR V2 pipeline for brain tumor segmentation on BraTS datasets.
 
+## Quick Summary
+
+### 🎯 Recommended for Different Scenarios
+
+| **Scenario** | **Loss Function** | **Command** |
+|:-------------|:------------------|:------------|
+| **Beginner/Baseline** | `dicece` | `--loss_type dicece --use_class_weights` |
+| **Standard Production** | `generalized_dice_focal` | `--loss_type generalized_dice_focal --gdl_lambda 1.0 --lambda_focal 0.5` |
+| **Competition/SOTA** | `adaptive_progressive_hybrid` | `--loss_type adaptive_progressive_hybrid --use_adaptive_scheduling` |
+| **Small Lesions (ET)** | `generalized_dice_focal` | `--loss_type generalized_dice_focal --class_weights 5.0 1.0 8.0` |
+| **Boundary Quality** | `hybrid_dice_hausdorff` | `--loss_type hybrid_dice_hausdorff --lambda_hausdorff 0.3` |
+
+### 📊 Loss Function Characteristics
+
+| **Loss Function** | **Complexity** | **Memory** | **Convergence** | **Best For** |
+|:------------------|:--------------:|:----------:|:---------------:|:-------------|
+| `dice` | ⚡ Simple | Low | Fast | Baseline experiments |
+| `dicece` | ⚡ Simple | Low | Fast | General purpose |
+| `dicefocal` | 🔶 Medium | Medium | Medium | Class imbalance |
+| `generalized_dice_focal` | 🔶 Medium | Medium | Medium | Small lesions |
+| `hybrid_gdl_focal_tversky` | 🔥 Complex | High | Slow | Multi-objective |
+| `adaptive_progressive` | 🔥 Complex | High | Variable | Curriculum learning |
+
+### 🚀 Quick Start Commands
+
+```bash
+# Beginner (fast training, good results)
+python kaggle_run.py --loss_type dicece --use_class_weights --epochs 50
+
+# Production (balanced performance/time)
+python kaggle_run.py --loss_type generalized_dice_focal --gdl_lambda 1.0 --lambda_focal 0.5 --epochs 80
+
+# Competition (maximum performance)
+python kaggle_run.py --loss_type adaptive_progressive_hybrid --use_adaptive_scheduling \
+  --structure_epochs 40 --boundary_epochs 70 --epochs 120 --class_weights 4.0 1.0 6.0
+```
+
+### 📈 Loss Function Categories
+
+| **Category** | **Functions** | **Use Case** |
+|:-------------|:--------------|:-------------|
+| **Basic** | `dice`, `dicece`, `dicefocal`, `focal`, `tversky`, `hausdorff` | Simple, reliable training |
+| **Advanced** | `generalized_dice`, `generalized_dice_focal` | Class imbalance handling |
+| **Hybrid** | `hybrid_gdl_focal_tversky`, `hybrid_dice_hausdorff` | Multi-objective optimization |
+| **Adaptive** | `adaptive_structure_boundary`, `adaptive_progressive_hybrid`, `adaptive_complexity_cascade`, `adaptive_dynamic_hybrid` | Curriculum learning, SOTA performance |
+
+### ⚙️ Key Parameters
+
+| **Parameter** | **Typical Values** | **Effect** |
+|:--------------|:-------------------|:-----------|
+| `class_weights` | `[4.0, 1.0, 6.0]` | Balance TC/WT/ET importance |
+| `focal_gamma` | `2.0-3.0` | Focus on hard examples |
+| `tversky_alpha` | `0.3` (sensitivity) / `0.7` (precision) | Control FN/FP trade-off |
+| `learning_rate` | `1e-4` to `1e-3` | Training speed/stability |
+
 ## Table of Contents
 - [Basic Loss Functions](#basic-loss-functions)
 - [Hybrid Loss Functions](#hybrid-loss-functions)
@@ -865,15 +920,12 @@ python kaggle_run.py --loss_type hybrid_gdl_focal_tversky \
 2. **Medium**: `generalized_dice`, `dicefocal`
 3. **Slower**: Hybrid and adaptive losses (but better final performance)
 
-### BraTS Leaderboard Performance (Typical Results)
-```
-dice:                     WT=0.88, TC=0.82, ET=0.75
-dicece:                   WT=0.89, TC=0.84, ET=0.77  
-dicefocal:                WT=0.89, TC=0.85, ET=0.79
-generalized_dice_focal:   WT=0.90, TC=0.86, ET=0.81
-hybrid_gdl_focal_tversky: WT=0.91, TC=0.87, ET=0.83
-adaptive_progressive:     WT=0.92, TC=0.88, ET=0.85
-```
+### Performance Characteristics
+
+- **Simple losses** (dice, dicece): Fast convergence, good baseline
+- **Focal-based losses**: Better for imbalanced classes, especially ET regions  
+- **Hybrid losses**: Balance multiple objectives, slower but more comprehensive
+- **Adaptive losses**: Best potential performance with proper tuning and time
 
 ---
 

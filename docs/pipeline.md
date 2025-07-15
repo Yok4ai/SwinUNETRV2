@@ -1,9 +1,11 @@
 # SwinUNETR++ Pipeline Implementation
 
-This document provides a comprehensive overview of the `BrainTumorSegmentation` pipeline implementation in `src/models/pipeline.py`.
+This document provides a comprehensive overview of the SwinUNETR++ training pipeline, from data preparation to model training.
 
 ## Table of Contents
-- [Pipeline Overview](#pipeline-overview)
+- [Complete Pipeline Flow](#complete-pipeline-flow)
+- [Component Details](#component-details)
+- [BrainTumorSegmentation Pipeline](#braintumorSegmentation-pipeline)
 - [Architecture Components](#architecture-components)
 - [Loss Function System](#loss-function-system)
 - [Adaptive Scheduling](#adaptive-scheduling)
@@ -13,9 +15,278 @@ This document provides a comprehensive overview of the `BrainTumorSegmentation` 
 
 ---
 
-## Pipeline Overview
+## Complete Pipeline Flow
 
-The `BrainTumorSegmentation` class is a PyTorch Lightning module that wraps the SwinUNETR++ model with comprehensive loss function optimization, adaptive scheduling, and local minima escape strategies.
+The SwinUNETR++ pipeline follows a comprehensive flow from CLI input to model training:
+
+```mermaid
+flowchart TD
+    A[kaggle_run.py] --> B[CLI Argument Parsing]
+    B --> C[kaggle_setup.py]
+    C --> D[BraTS Dataset Preparation]
+    D --> E[dataset.json Creation]
+    E --> F[main.py]
+    F --> G[get_transforms]
+    F --> H[get_dataloaders]
+    G --> I[setup_training]
+    H --> I
+    I --> J[BrainTumorSegmentation]
+    I --> K[PyTorch Lightning Trainer]
+    J --> L[Training Loop]
+    K --> L
+    L --> M[WandB Logging]
+    L --> N[Model Checkpoints]
+    
+    G -.-> G1[augmentations.py]
+    H -.-> H1[dataloader.py]
+    I -.-> I1[trainer.py]
+    J -.-> J1[pipeline.py]
+    
+    style A fill:#e1f5fe
+    style F fill:#f3e5f5
+    style J fill:#e8f5e8
+    style L fill:#fff3e0
+    style M fill:#fce4ec
+    style N fill:#e0f2f1
+```
+
+### 1. Entry Point: `kaggle_run.py`
+
+**Purpose**: Main CLI interface with comprehensive parameter control
+
+```python
+# Key responsibilities:
+- Parse 30+ CLI arguments (loss types, scheduling, warm restarts)
+- Setup environment and call kaggle_setup.py
+- Create args namespace with all configuration
+- Call main(args) to start training pipeline
+```
+
+**Key Features:**
+- **14 Loss Types**: All loss functions with parameter control
+- **Adaptive Scheduling**: Structure/boundary epoch control
+- **Warm Restarts**: Local minima escape configuration
+- **Example Commands**: From beginner to competition settings
+
+### 2. Dataset Preparation: `kaggle_setup.py`
+
+**Purpose**: Prepare BraTS dataset and create standardized dataset.json
+
+```python
+def setup_kaggle_notebook(dataset_type):
+    # 1. Detect Kaggle vs local environment
+    # 2. Prepare BraTS 2021 or 2023 dataset
+    # 3. Create dataset.json with proper label mapping
+    # 4. Return output directory path
+```
+
+**Key Features:**
+- **Multi-Dataset Support**: BraTS 2021/2023 with different label conventions
+- **Environment Detection**: Automatic Kaggle vs local setup
+- **Data Structure**: Creates MONAI-compatible dataset.json
+- **Label Mapping**: Handles dataset-specific label formats
+
+### 3. Main Orchestrator: `main.py`
+
+**Purpose**: Coordinate the complete training pipeline
+
+```python
+def main(args):
+    # 1. Setup transforms: get_transforms(args)
+    # 2. Create dataloaders: get_dataloaders(args, transforms)
+    # 3. Initialize training: setup_training(train_loader, val_loader, args)
+    # 4. Start training: train_model(model, trainer, loaders)
+```
+
+**Pipeline Steps:**
+1. **Data Transforms**: Calls `src/data/augmentations.py`
+2. **Data Loading**: Calls `src/data/dataloader.py`
+3. **Model Setup**: Calls `src/models/trainer.py`
+4. **Training**: Orchestrates the complete training loop
+
+---
+
+## Component Details
+
+### Data Processing Components
+
+#### 1. Data Augmentations (`src/data/augmentations.py`)
+
+**Purpose**: MONAI-based transforms for robust training
+
+```python
+def get_transforms(args):
+    train_transforms = Compose([
+        # Loading and formatting
+        LoadImaged(keys=["image", "label"]),
+        EnsureChannelFirstd(keys=["image", "label"]),
+        
+        # Spatial preprocessing
+        Orientationd(keys=["image", "label"], axcodes="RAS"),
+        Spacingd(keys=["image", "label"], pixdim=args.pixdim),
+        
+        # Training augmentations
+        RandCropByPosNegLabeld(keys=["image", "label"], ...),
+        RandFlipd(keys=["image", "label"], prob=0.5),
+        RandRotate90d(keys=["image", "label"], prob=0.5),
+        
+        # Intensity augmentations
+        NormalizeIntensityd(keys="image", nonzero=True),
+        RandScaleIntensityd(keys="image", factors=0.1, prob=0.5),
+        RandShiftIntensityd(keys="image", offsets=0.1, prob=0.5),
+    ])
+    
+    val_transforms = Compose([
+        # Only essential preprocessing for validation
+        LoadImaged(keys=["image", "label"]),
+        EnsureChannelFirstd(keys=["image", "label"]),
+        Orientationd(keys=["image", "label"], axcodes="RAS"),
+        Spacingd(keys=["image", "label"], pixdim=args.pixdim),
+        NormalizeIntensityd(keys="image", nonzero=True),
+    ])
+```
+
+**Key Features:**
+- **Training Augmentations**: Spatial and intensity randomization
+- **Validation Transforms**: Minimal preprocessing only
+- **MONAI Integration**: Full compatibility with medical imaging standards
+- **Configurable**: Parameters controlled via CLI arguments
+
+#### 2. Label Conversion (`src/data/convert_labels.py`)
+
+**Purpose**: Convert between BraTS 2021/2023 label conventions
+
+```python
+class ConvertLabels(Transform):
+    def __init__(self, dataset_type="brats2023"):
+        self.dataset_type = dataset_type
+    
+    def __call__(self, data):
+        if self.dataset_type == "brats2021":
+            # BraTS 2021: labels [0, 1, 2, 4] -> [0, 1, 2, 3]
+            label[label == 4] = 3
+        elif self.dataset_type == "brats2023":
+            # BraTS 2023: labels [0, 1, 2, 3] (already correct)
+            pass
+        
+        # Convert to TC, WT, ET format
+        return convert_to_multi_channel(label)
+```
+
+**Label Mappings:**
+- **BraTS 2021**: `[0, 1, 2, 4]` → `[Background, NCR/NET, ED, ET]`
+- **BraTS 2023**: `[0, 1, 2, 3]` → `[Background, NCR/NET, ED, ET]`
+- **Output**: 3-channel format for TC, WT, ET segmentation
+
+#### 3. Data Loading (`src/data/dataloader.py`)
+
+**Purpose**: Create PyTorch DataLoaders with proper splitting
+
+```python
+def get_dataloaders(args, train_transforms, val_transforms):
+    # 1. Load dataset.json created by kaggle_setup.py
+    datalist = load_decathlon_datalist(
+        data_list_file_path=args.dataset_json,
+        is_segmentation=True,
+        data_list_key="training"
+    )
+    
+    # 2. 80/20 train/validation split
+    train_files, val_files = train_test_split(
+        datalist, test_size=0.2, random_state=42
+    )
+    
+    # 3. Create datasets with transforms
+    train_ds = CacheDataset(
+        data=train_files,
+        transform=train_transforms,
+        cache_rate=args.cache_rate,
+        num_workers=args.num_workers
+    )
+    
+    val_ds = CacheDataset(
+        data=val_files,
+        transform=val_transforms,
+        cache_rate=args.cache_rate,
+        num_workers=args.num_workers
+    )
+    
+    # 4. Create DataLoaders
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, ...)
+    val_loader = DataLoader(val_ds, batch_size=1, ...)
+    
+    return train_loader, val_loader
+```
+
+**Key Features:**
+- **Reproducible Splitting**: Fixed random seed for consistent splits
+- **Caching**: Configurable cache rate for performance
+- **Memory Optimization**: Proper batch sizing and worker configuration
+- **Validation**: Batch size 1 for sliding window inference
+
+### Training Components
+
+#### 4. Training Setup (`src/models/trainer.py`)
+
+**Purpose**: Initialize PyTorch Lightning trainer with all components
+
+```python
+def setup_training(train_loader, val_loader, args):
+    # 1. Setup callbacks
+    early_stop_callback = EarlyStopping(
+        monitor="val_mean_dice",
+        patience=args.early_stopping_patience,
+        mode='max'
+    )
+    
+    checkpoint_callback = ModelCheckpoint(
+        dirpath='checkpoints',
+        filename='swinunetr-{epoch:02d}-{val_mean_dice:.4f}',
+        monitor='val_mean_dice',
+        save_top_k=3
+    )
+    
+    # 2. Setup WandB logger
+    wandb_logger = WandbLogger(
+        project="brain-tumor-segmentation",
+        name="swinunetr-experimental"
+    )
+    
+    # 3. Initialize BrainTumorSegmentation model
+    model = BrainTumorSegmentation(
+        train_loader=train_loader,
+        val_loader=val_loader,
+        # Pass ALL CLI arguments to model
+        **vars(args)
+    )
+    
+    # 4. Setup PyTorch Lightning trainer
+    trainer = pl.Trainer(
+        max_epochs=args.epochs,
+        callbacks=[early_stop_callback, checkpoint_callback],
+        logger=wandb_logger,
+        # All trainer configuration from args
+        **trainer_config
+    )
+    
+    return model, trainer
+
+def train_model(model, trainer, train_loader, val_loader):
+    # Start training with comprehensive error handling
+    trainer.fit(model, train_loader, val_loader)
+```
+
+**Key Features:**
+- **Early Stopping**: Monitors validation Dice with configurable patience
+- **Checkpointing**: Saves top-k models and last checkpoint
+- **WandB Integration**: Comprehensive experiment tracking
+- **Error Handling**: Graceful failure with detailed messaging
+
+---
+
+## BrainTumorSegmentation Pipeline
+
+The core `BrainTumorSegmentation` class in `src/models/pipeline.py` is a PyTorch Lightning module that wraps the SwinUNETR++ model with comprehensive loss function optimization, adaptive scheduling, and local minima escape strategies.
 
 ### Key Features
 - **14 Loss Functions**: From basic Dice to complex adaptive hybrids
