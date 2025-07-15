@@ -26,6 +26,26 @@ from monai.transforms import (
     Orientationd, Spacingd, NormalizeIntensityd, Resized
 )
 from monai.data import Dataset, DataLoader
+import nibabel as nib
+
+def load_nifti_as_tensor(nii_path, target_shape=(96, 96, 96)):
+    img = nib.load(nii_path)
+    data = img.get_fdata()
+    # If single channel, repeat to 4 channels (for demo)
+    if data.ndim == 3:
+        data = np.stack([data]*4, axis=0)  # (4, D, H, W)
+    elif data.ndim == 4:
+        # If already 4 channels, just transpose if needed
+        if data.shape[0] != 4:
+            data = np.transpose(data, (3, 0, 1, 2))  # (4, D, H, W)
+    # Normalize each channel
+    for i in range(data.shape[0]):
+        d = data[i]
+        data[i] = (d - d.mean()) / (d.std() + 1e-8)
+    # Resize to target shape
+    tensor = torch.from_numpy(data).float().unsqueeze(0)  # (1, 4, D, H, W)
+    tensor = F.interpolate(tensor, size=target_shape, mode='trilinear', align_corners=False)
+    return tensor
 
 def get_transforms():
     return Compose([
@@ -114,19 +134,21 @@ class AttentionRollout:
 
 def main():
     parser = argparse.ArgumentParser(description="Minimal SwinUNETR GradCAM & Attention Rollout")
-    parser.add_argument("--image_path", type=str, required=True, help="Path to a preprocessed .pt or .npy image file (shape [1, 4, 96, 96, 96])")
+    parser.add_argument("--image_path", type=str, required=True, help="Path to a preprocessed .nii, .nii.gz, .pt or .npy image file (shape [1, 4, 96, 96, 96])")
     parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to model checkpoint")
     parser.add_argument("--target_class", type=int, default=1, help="Target class index for GradCAM")
     parser.add_argument("--gradcam_layer", type=str, default="encoder1.layer.norm3", help="Layer for GradCAM")
     args = parser.parse_args()
 
     # Load image
-    if args.image_path.endswith(".pt"):
+    if args.image_path.endswith(".nii") or args.image_path.endswith(".nii.gz"):
+        image = load_nifti_as_tensor(args.image_path, target_shape=(96, 96, 96))
+    elif args.image_path.endswith(".pt"):
         image = torch.load(args.image_path)
     elif args.image_path.endswith(".npy"):
         image = torch.from_numpy(np.load(args.image_path))
     else:
-        raise ValueError("Unsupported image format. Use .pt or .npy.")
+        raise ValueError("Unsupported image format. Use .nii, .nii.gz, .pt or .npy.")
     if image.ndim == 4:
         image = image.unsqueeze(0)  # [1, 4, 96, 96, 96]
 
