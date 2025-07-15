@@ -14,6 +14,8 @@ from models.swinunetr import SwinUNETR
 from data.augmentations import get_transforms
 from data.dataloader import get_dataloaders
 from kaggle_setup import prepare_brats_data
+from monai.visualize.class_activation_maps import CAM
+from monai.visualize.gradient_based import VanillaGrad
 
 set_determinism(42)
 
@@ -52,20 +54,69 @@ def resize_cam(cam, target_shape):
     cam = F.interpolate(cam, size=target_shape, mode="trilinear", align_corners=False)
     return normalize(cam)
 
-def show_cam_overlay(image, cam, title, channel_idx=3, save_path=None):
+def show_cam_overlay(image, cam, title, channel_idx=3, save_path=None, label=None, cam_map=None, grad_map=None):
     channel_names = ["T1c", "T1n", "T2f", "T2w"]
     channel_name = channel_names[channel_idx] if 0 <= channel_idx < len(channel_names) else f"Channel {channel_idx}"
     mid = image.shape[2] // 2
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 2, 1)
+    n_panels = 2
+    if cam_map is not None:
+        n_panels += 1
+    if grad_map is not None:
+        n_panels += 1
+    if label is not None:
+        n_panels += 1
+    plt.figure(figsize=(5 * n_panels, 5))
+    # Panel 1: Original
+    plt.subplot(1, n_panels, 1)
     plt.imshow(image[channel_idx, :, mid, :], cmap="gray")
     plt.title(f"Original - {channel_name}")
     plt.axis("off")
-    plt.subplot(1, 2, 2)
+    # Panel 2: GradCAM overlay
+    plt.subplot(1, n_panels, 2)
     plt.imshow(image[channel_idx, :, mid, :], cmap="gray")
     plt.imshow(cam[0, :, mid, :], cmap="jet_r", alpha=0.5)
     plt.title(f"Grad-CAM Overlay - {channel_name}")
     plt.axis("off")
+    panel_idx = 3
+    # Panel 3: CAM overlay
+    if cam_map is not None:
+        try:
+            plt.subplot(1, n_panels, panel_idx)
+            plt.imshow(image[channel_idx, :, mid, :], cmap="gray")
+            plt.imshow(cam_map[0, :, mid, :], cmap="hot", alpha=0.5)
+            plt.title(f"CAM Overlay - {channel_name}")
+            plt.axis("off")
+            panel_idx += 1
+        except Exception as e:
+            print(f"[WARN] CAM visualization failed: {e}")
+    # Panel 4: VanillaGrad overlay
+    if grad_map is not None:
+        try:
+            plt.subplot(1, n_panels, panel_idx)
+            plt.imshow(image[channel_idx, :, mid, :], cmap="gray")
+            plt.imshow(grad_map[0, :, mid, :], cmap="cool", alpha=0.5)
+            plt.title(f"VanillaGrad Overlay - {channel_name}")
+            plt.axis("off")
+            panel_idx += 1
+        except Exception as e:
+            print(f"[WARN] VanillaGrad visualization failed: {e}")
+    # Panel 5: Blend with label (if available)
+    if label is not None:
+        try:
+            if label.ndim == 4:
+                label_ch = label[0]
+            elif label.ndim == 3:
+                label_ch = label
+            else:
+                label_ch = label
+            blend = blend_images(image[channel_idx], label_ch, alpha=0.5, cmap='hsv')
+            plt.subplot(1, n_panels, panel_idx)
+            plt.imshow(blend[:, mid, :])
+            plt.title(f"Blend: {channel_name} + Label")
+            plt.axis("off")
+            panel_idx += 1
+        except Exception as e:
+            print(f"[WARN] Blend visualization failed: {e}")
     plt.suptitle(title)
     plt.tight_layout()
     if save_path:
@@ -107,17 +158,36 @@ def run_gradcam(
     # GradCAM
     gradcam = GradCAM(nn_module=model, target_layers=target_layer)
     cam_raw = gradcam(x=image, class_idx=target_class)
-
-    # Resize and Normalize CAM
     cam = resize_cam(cam_raw, image.shape[2:])
+
+    # CAM
+    try:
+        cam_vis = CAM(nn_module=model, target_layers=target_layer)
+        cam_map_raw = cam_vis(x=image, class_idx=target_class)
+        cam_map = resize_cam(cam_map_raw, image.shape[2:])
+    except Exception as e:
+        print(f"[WARN] CAM computation failed: {e}")
+        cam_map = None
+
+    # VanillaGrad
+    try:
+        grad_vis = VanillaGrad(model)
+        grad_map_raw = grad_vis(image, class_idx=target_class)
+        grad_map = resize_cam(grad_map_raw, image.shape[2:])
+    except Exception as e:
+        print(f"[WARN] VanillaGrad computation failed: {e}")
+        grad_map = None
 
     # Visualization
     input_np = image[0].cpu().numpy()
     cam_np = cam[0].cpu().numpy()
+    cam_map_np = cam_map[0].cpu().numpy() if cam_map is not None else None
+    grad_map_np = grad_map[0].cpu().numpy() if grad_map is not None else None
+    label_np = sample["label"].cpu().numpy() if "label" in sample else None
     class_names = ["Tumor Core", "Whole Tumor", "Enhancing Tumor"]
     os.makedirs(output_dir, exist_ok=True)
     save_path = os.path.join(output_dir, f"gradcam_sample{sample_idx}_class{target_class}_layer{target_layer}_channel{channel_idx}.png")
-    show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}", channel_idx=channel_idx, save_path=save_path)
+    show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}", channel_idx=channel_idx, save_path=save_path, label=label_np, cam_map=cam_map_np, grad_map=grad_map_np)
     return input_np, cam_np
 
 def main():
