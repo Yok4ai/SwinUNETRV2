@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from monai.networks.nets import SwinUNETR
 from monai.visualize import GradCAM, blend_images
 import nibabel as nib
+import matplotlib.cm as cm
 
 
 def load_nifti_as_tensor(nii_path, target_shape=(96, 96, 96)):
@@ -139,8 +140,11 @@ def main():
     input_np = image[0].cpu().numpy()
     cam_np = cam[0].cpu().numpy()
     show_cam_overlay(input_np, cam_np, f'Grad-CAM: class {args.target_class}')
-    # Save overlay as image
-    plt.imsave(os.path.join(args.output_dir, "gradcam_overlay.png"), cam_np[:, cam_np.shape[1]//2, :], cmap="jet")
+    # Save overlay as image with colormap
+    mid_slice = cam_np[:, cam_np.shape[1]//2, :]
+    colored = cm.get_cmap("jet")(mid_slice)  # shape [H, W, 4]
+    colored = (colored[:, :, :3] * 255).astype(np.uint8)  # drop alpha, convert to uint8
+    plt.imsave(os.path.join(args.output_dir, "gradcam_overlay.png"), colored)
     # Prediction overlay
     with torch.no_grad():
         predictions = model(image)
