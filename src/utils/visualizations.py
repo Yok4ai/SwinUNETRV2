@@ -18,7 +18,7 @@ from captum.attr import Saliency
 
 set_determinism(42)
 
-def load_datalist(path, max_samples=40):
+def load_datalist(path, max_samples=100):
     with open(path) as f:
         return json.load(f)["training"][:max_samples]
 
@@ -143,14 +143,11 @@ def run_saliency(
     if image.shape[2:] != (96, 96, 96):
         image = F.interpolate(image, size=(96, 96, 96), mode="trilinear", align_corners=False)
     def forward_func(x):
-        return model(x)
-    # Compute output shape to determine center voxel
-    with torch.no_grad():
-        output_shape = model(image).shape  # [1, C, D, H, W]
-    center = tuple(s // 2 for s in output_shape[2:])  # (D//2, H//2, W//2)
-    saliency_target = (target_class,) + center  # (class, D//2, H//2, W//2)
+        output = model(x)
+        # Aggregate over all voxels for the target class
+        return output[:, target_class].sum()
     saliency = Saliency(forward_func)
-    attributions = saliency.attribute(image, target=saliency_target)
+    attributions = saliency.attribute(image, target=None)
     attributions = attributions.detach().cpu().numpy()[0]
     input_np = image[0].detach().cpu().numpy()
     mid = input_np.shape[2] // 2
