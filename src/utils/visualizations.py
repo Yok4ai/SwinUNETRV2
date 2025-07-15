@@ -223,10 +223,11 @@ class SwinUNETRVisualizer:
         self.gradcam = SwinUNETRGradCAM(self.model, target_layers=target_layers)
         self.attention_rollout = AttentionRollout(self.model)
         
-        # Initialize occlusion sensitivity
+        # Set mask_size for occlusion sensitivity to a value that divides patch_size
+        mask_size = min(8, *patch_size)
         self.occlusion_sensitivity = OcclusionSensitivity(
             nn_module=self.model,
-            mask_size=8,
+            mask_size=mask_size,
             n_batch=4,
             mode='gaussian'
         )
@@ -480,11 +481,18 @@ class SwinUNETRVisualizer:
             attention = self.attention_rollout.generate_rollout(center_patch)
             
             # Occlusion sensitivity (on patch)
-            try:
-                occ_map, _ = self.occlusion_sensitivity(center_patch)
-                occlusion = occ_map[0, :, :, :, class_idx].cpu()
-            except Exception as e:
-                print(f"Warning: Could not compute occlusion sensitivity for {class_name}: {e}")
+            # Only run occlusion if patch is large enough for mask
+            mask_size = self.occlusion_sensitivity.mask_size
+            _, _, pd, ph, pw = center_patch.shape
+            if pd >= mask_size and ph >= mask_size and pw >= mask_size:
+                try:
+                    occ_map, _ = self.occlusion_sensitivity(center_patch)
+                    occlusion = occ_map[0, :, :, :, class_idx].detach().cpu()
+                except Exception as e:
+                    print(f"Warning: Could not compute occlusion sensitivity for {class_name}: {e}")
+                    occlusion = torch.zeros_like(center_patch[0, 0])
+            else:
+                print(f"Skipping occlusion sensitivity for {class_name}: patch too small for mask_size {mask_size}")
                 occlusion = torch.zeros_like(center_patch[0, 0])
             
             results[class_name] = {
@@ -522,18 +530,18 @@ class SwinUNETRVisualizer:
                                     save_path: str = None) -> None:
         """Comprehensive visualization with multiple techniques."""
         # Extract slice
-        img_slice = input_tensor[0, 0, :, :, slice_idx].cpu().numpy()  # T1 modality
-        pred_slice = predictions[0, :, :, :, slice_idx].cpu().numpy()
+        img_slice = input_tensor[0, 0, :, :, slice_idx].detach().cpu().numpy()  # T1 modality
+        pred_slice = predictions[0, :, :, :, slice_idx].detach().cpu().numpy()
         
         # Get the first available GradCAM map
         gradcam_slice = None
         for layer_name, gradcam_map in class_results['gradcam_maps'].items():
             if gradcam_map.dim() == 3:
-                gradcam_slice = gradcam_map[:, :, slice_idx].cpu().numpy()
+                gradcam_slice = gradcam_map[:, :, slice_idx].detach().cpu().numpy()
                 break
         
-        attention_slice = class_results['attention'][:, :, slice_idx].cpu().numpy() if class_results['attention'].dim() == 3 else class_results['attention'].cpu().numpy()
-        occlusion_slice = class_results['occlusion'][:, :, slice_idx].cpu().numpy() if class_results['occlusion'].dim() == 3 else class_results['occlusion'].cpu().numpy()
+        attention_slice = class_results['attention'][:, :, slice_idx].detach().cpu().numpy() if class_results['attention'].dim() == 3 else class_results['attention'].detach().cpu().numpy()
+        occlusion_slice = class_results['occlusion'][:, :, slice_idx].detach().cpu().numpy() if class_results['occlusion'].dim() == 3 else class_results['occlusion'].detach().cpu().numpy()
         
         # Create comprehensive visualization
         fig, axes = plt.subplots(2, 4, figsize=(20, 10))
@@ -591,7 +599,7 @@ class SwinUNETRVisualizer:
         axes[1, 2].axis('off')
         
         # Probability heatmap
-        prob_slice = class_results['probabilities'][:, :, slice_idx].cpu().numpy()
+        prob_slice = class_results['probabilities'][:, :, slice_idx].detach().cpu().numpy()
         axes[1, 3].imshow(prob_slice, cmap='plasma')
         axes[1, 3].set_title('Probability Map')
         axes[1, 3].axis('off')
