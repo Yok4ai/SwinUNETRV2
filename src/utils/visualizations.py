@@ -178,7 +178,16 @@ def main():
         print('Attention map shape:', attn_np.shape)
         if attn_np.ndim == 3:  # [num_heads, N, N]
             attn_np = attn_np.mean(0)
+        elif attn_np.ndim == 1:  # [N] - need to reshape to square
+            # Calculate square root to get spatial dimensions
+            n = int(np.sqrt(attn_np.shape[0]))
+            if n * n == attn_np.shape[0]:
+                attn_np = attn_np.reshape(n, n)
+            else:
+                print(f"Warning: Cannot reshape {attn_np.shape[0]} to square matrix")
+                return
         # Now attn_np should be [N, N] (2D)
+        plt.figure(figsize=(8, 6))
         plt.imshow(attn_np, cmap='hot')
         plt.title('Attention Rollout (first block)')
         plt.colorbar()
