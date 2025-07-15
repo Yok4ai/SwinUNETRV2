@@ -8,9 +8,9 @@ from monai.visualize import GradCAM
 from monai.utils.misc import set_determinism
 
 # Project-specific imports
-from src.models.swinunetr import SwinUNETR
-from src.data.augmentations import get_transforms
-from src.data.dataloader import get_dataloaders
+from models.swinunetr import SwinUNETR
+from data.augmentations import get_transforms
+from data.dataloader import get_dataloaders
 from kaggle_setup import prepare_brats_data
 
 set_determinism(42)
