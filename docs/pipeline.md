@@ -42,12 +42,12 @@ flowchart TD
     I -.-> I1[trainer.py]
     J -.-> J1[pipeline.py]
     
-    style A fill:#e1f5fe
-    style F fill:#f3e5f5
-    style J fill:#e8f5e8
-    style L fill:#fff3e0
-    style M fill:#fce4ec
-    style N fill:#e0f2f1
+    style A fill:#2d3748,stroke:#4a5568,color:#ffffff
+    style F fill:#1a202c,stroke:#2d3748,color:#ffffff
+    style J fill:#2a4a3a,stroke:#38a169,color:#ffffff
+    style L fill:#2d2016,stroke:#ecc94b,color:#ffffff
+    style M fill:#2a1a2e,stroke:#9f7aea,color:#ffffff
+    style N fill:#1a2e2a,stroke:#48bb78,color:#ffffff
 ```
 
 ### 1. Entry Point: `kaggle_run.py`
