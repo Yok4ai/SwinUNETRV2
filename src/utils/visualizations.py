@@ -84,7 +84,7 @@ def run_gradcam(
     loader = DataLoader(dataset, batch_size=1)
 
     # Model
-    model = build_model(img_size=96, in_channels=4, out_channels=3, feature_size=24, use_v2=True)
+    model = build_model(img_size=96, in_channels=4, out_channels=3, feature_size=48, use_v2=True)
     model, device = load_weights(model, checkpoint_path)
 
     # Get sample
