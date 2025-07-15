@@ -144,8 +144,8 @@ def run_saliency(
         image = F.interpolate(image, size=(96, 96, 96), mode="trilinear", align_corners=False)
     def forward_func(x):
         output = model(x)
-        # Aggregate over all voxels for the target class
-        return output[:, target_class].sum()
+        # Aggregate over all voxels for the target class and keep batch dimension
+        return output[:, target_class].sum().unsqueeze(0)
     saliency = Saliency(forward_func)
     attributions = saliency.attribute(image, target=None)
     attributions = attributions.detach().cpu().numpy()[0]
