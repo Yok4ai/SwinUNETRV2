@@ -195,7 +195,7 @@ def run_smoothgrad(
     smooth_grad = SmoothGrad(model, stdev_spread=0.15, n_samples=25, magnitude=True, verbose=True)
     def forward_func(x):
         return model(x)[:, target_class].sum().unsqueeze(0)
-    attributions = smooth_grad(x=image, class_idx=None, forward_func=forward_func)
+    attributions = smooth_grad(x=image, forward_func=forward_func)
     attributions = attributions.detach().cpu().numpy()[0]
     input_np = image[0].detach().cpu().numpy()
     mid = input_np.shape[2] // 2
