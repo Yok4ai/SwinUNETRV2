@@ -139,6 +139,9 @@ def run_saliency(
     sample = dataset[sample_idx]
     image = sample["image"].unsqueeze(0).to(device)
     image.requires_grad = True
+    # Force resize to [96, 96, 96] if needed
+    if image.shape[2:] != (96, 96, 96):
+        image = F.interpolate(image, size=(96, 96, 96), mode="trilinear", align_corners=False)
     def forward_func(x):
         return model(x)
     saliency = Saliency(forward_func)
