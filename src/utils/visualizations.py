@@ -181,7 +181,8 @@ def run_integrated_gradients(
     sample_idx=0,
     target_class=1,
     output_dir=".",
-    channel_idx=3
+    channel_idx=3,
+    cmap="magma"
 ):
     datalist = load_datalist(dataset_path)
     train_tfms, val_tfms = get_transforms(img_size=96)
@@ -212,7 +213,7 @@ def run_integrated_gradients(
     plt.subplot(1, 2, 2)
     plt.imshow(input_np[channel_idx, :, mid, :], cmap="gray")
     attr_norm = normalize_attr(attributions[channel_idx, :, mid, :])
-    plt.imshow(attr_norm, cmap="hot", alpha=0.5)
+    plt.imshow(attr_norm, cmap=cmap, alpha=0.5)
     plt.title("Integrated Gradients Overlay")
     plt.axis("off")
     plt.tight_layout()
@@ -236,6 +237,7 @@ def main():
     parser.add_argument("--dataset_type", type=str, default="brats2023", choices=["brats2021", "brats2023"], help="Dataset type (for --prepare_json)")
     parser.add_argument("--channel_idx", type=int, default=3, help="Image channel index to visualize (0=T1c, 1=T1n, 2=T2f, 3=T2w)")
     parser.add_argument("--method", type=str, default="gradcam", choices=["gradcam", "saliency", "integrated_gradients"], help="Visualization method: gradcam, saliency, or integrated_gradients")
+    parser.add_argument("--cmap", type=str, default="magma", help="Colormap for attribution overlay (e.g., magma, jet, hot, viridis)")
     args = parser.parse_args()
 
     dataset_json_path = args.dataset_path
@@ -275,7 +277,8 @@ def main():
             sample_idx=args.sample_idx,
             target_class=args.targetclass,
             output_dir=args.output_dir,
-            channel_idx=args.channel_idx
+            channel_idx=args.channel_idx,
+            cmap=args.cmap
         )
     else:
         raise ValueError(f"Unknown visualization method: {args.method}")
