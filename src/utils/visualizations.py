@@ -38,7 +38,8 @@ from monai.visualize.utils import blend_images, matshow3d
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from src.models.swinunetrplus import SwinUNETR
+# from src.models.swinunetrplus import SwinUNETR
+from monai.networks.nets import SwinUNETR
 from src.models.pipeline import BrainTumorSegmentation
 from src.data.augmentations import get_transforms
 from src.data.convert_labels import ConvertLabels
