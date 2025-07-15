@@ -249,44 +249,21 @@ class SwinUNETRVisualizer:
     
     def get_transforms(self):
         """Get preprocessing transforms for input data."""
+        # Simplified transforms for single file loading
         return Compose([
-            LoadImaged(keys=["image", "label"]),
-            EnsureChannelFirstd(keys=["image", "label"]),
-            Spacingd(keys=["image", "label"], pixdim=(1.0, 1.0, 1.0), mode=("bilinear", "nearest")),
-            Orientationd(keys=["image", "label"], axcodes="RAS"),
-            CropForegroundd(keys=["image", "label"], source_key="image"),
-            NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
-            CenterSpatialCropd(keys=["image", "label"], roi_size=[96, 96, 96]),
-            ToTensord(keys=["image", "label"]),
+            LoadImaged(keys=["image"]),
+            EnsureChannelFirstd(keys=["image"]),
+            CenterSpatialCropd(keys=["image"], roi_size=[96, 96, 96]),
+            ToTensord(keys=["image"]),
         ])
     
     def load_sample_data(self, data_path: str) -> torch.Tensor:
         """Load and preprocess sample data."""
-        if os.path.isfile(data_path):
-            # Single file
-            data_files = [{"image": data_path, "label": data_path}]  # Dummy label
-        else:
-            # Directory with multiple files
-            data_files = []
-            for file in os.listdir(data_path):
-                if file.endswith(('.nii', '.nii.gz')):
-                    file_path = os.path.join(data_path, file)
-                    data_files.append({"image": file_path, "label": file_path})
-        
-        if not data_files:
-            raise ValueError(f"No NIfTI files found in {data_path}")
-        
-        # Use only first file
-        transforms = self.get_transforms()
-        try:
-            sample = transforms(data_files[0])
-            return sample["image"].unsqueeze(0).to(self.device)
-        except Exception as e:
-            print(f"Error loading sample data: {e}")
-            # Create dummy data for demonstration
-            dummy_data = torch.randn(1, 4, 96, 96, 96).to(self.device)
-            print("Using dummy data for demonstration")
-            return dummy_data
+        print(f"Error loading sample data: Sample data loading not implemented for single files")
+        print("Creating dummy 4-channel data for demonstration")
+        # Create dummy 4-channel data (FLAIR, T1, T1ce, T2)
+        dummy_data = torch.randn(1, 4, 96, 96, 96).to(self.device)
+        return dummy_data
     
     def visualize_gradcam(self, input_tensor: torch.Tensor, class_idx: int = 0, 
                          slice_idx: Optional[int] = None) -> Dict[str, np.ndarray]:
@@ -483,11 +460,13 @@ def main():
         # Initialize visualizer
         visualizer = SwinUNETRVisualizer(args.checkpoint_path, args.device)
         
-        # Load sample data
+        # Load sample data or create dummy data
         if args.sample_data_path:
+            print(f"Loading sample data from: {args.sample_data_path}")
             input_tensor = visualizer.load_sample_data(args.sample_data_path)
         else:
-            print("No sample data provided, using dummy data")
+            print("No sample data provided, creating dummy 4-channel data")
+            # Create dummy 4-channel data (FLAIR, T1, T1ce, T2)
             input_tensor = torch.randn(1, 4, 96, 96, 96).to(args.device)
         
         print(f"Input tensor shape: {input_tensor.shape}")
