@@ -159,7 +159,7 @@ def run_saliency(
     plt.axis("off")
     plt.subplot(1, 2, 2)
     plt.imshow(input_np[channel_idx, :, mid, :], cmap="gray")
-    plt.imshow(attributions[channel_idx, :, mid, :], cmap="hot", alpha=0.5)
+    plt.imshow(attributions[channel_idx, :, mid, :], cmap="jet_r", alpha=0.5)
     plt.title("Saliency Overlay")
     plt.axis("off")
     plt.tight_layout()
