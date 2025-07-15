@@ -229,7 +229,6 @@ class SwinUNETRVisualizer:
         """Load model from checkpoint."""
         # Create standard MONAI SwinUNETR model
         model = SwinUNETR(
-            img_size=(96, 96, 96),  # Standard size for BraTS
             in_channels=4,
             out_channels=3,
             feature_size=48,
