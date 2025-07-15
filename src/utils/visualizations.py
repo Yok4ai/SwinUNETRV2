@@ -450,6 +450,18 @@ class SwinUNETRVisualizer:
         h1 = min(H, h0 + ph)
         w1 = min(W, w0 + pw)
         center_patch = input_tensor[:, :, d0:d1, h0:h1, w0:w1]
+        # Pad patch to ensure all spatial dims are divisible by 32
+        def pad_to_divisible(tensor, divisor=32):
+            B, C, D, H, W = tensor.shape
+            pad_d = (divisor - D % divisor) % divisor
+            pad_h = (divisor - H % divisor) % divisor
+            pad_w = (divisor - W % divisor) % divisor
+            return F.pad(tensor, (
+                pad_w // 2, pad_w - pad_w // 2,
+                pad_h // 2, pad_h - pad_h // 2,
+                pad_d // 2, pad_d - pad_d // 2
+            ), mode='constant', value=0)
+        center_patch = pad_to_divisible(center_patch, divisor=32)
         
         # Generate visualizations for each class
         results = {}
