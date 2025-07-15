@@ -34,6 +34,7 @@ from monai.transforms import (
 from monai.data import decollate_batch
 from monai.visualize import GradCAM, OcclusionSensitivity
 from monai.visualize.utils import blend_images, matshow3d
+from monai.inferers import sliding_window_inference
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -195,16 +196,20 @@ class AttentionRollout:
 class SwinUNETRVisualizer:
     """Main visualization class for SwinUNETR."""
     
-    def __init__(self, model_path: str, device: str = "cuda" if torch.cuda.is_available() else "cpu"):
+    def __init__(self, model_path: str, device: str = "cuda" if torch.cuda.is_available() else "cpu", roi_size=(96, 96, 96), sw_batch_size=1):
         """
         Initialize visualizer.
         
         Args:
             model_path: Path to model checkpoint
             device: Device to run on
+            roi_size: ROI size for sliding window inference
+            sw_batch_size: Sliding window batch size
         """
         self.device = device
         self.model = self._load_model(model_path)
+        self.roi_size = roi_size
+        self.sw_batch_size = sw_batch_size
         
         # Initialize visualization tools
         target_layers = ["encoder4", "encoder3", "encoder2", "swinViT.layers4.0"]
@@ -336,12 +341,22 @@ class SwinUNETRVisualizer:
         return tensor
     
     def predict(self, input_tensor: torch.Tensor) -> torch.Tensor:
-        """Make prediction."""
+        """Make prediction using sliding window inference to avoid CUDA OOM."""
         with torch.no_grad():
-            output = self.model(input_tensor)
+            try:
+                output = sliding_window_inference(
+                    input_tensor, 
+                    roi_size=self.roi_size, 
+                    sw_batch_size=self.sw_batch_size, 
+                    predictor=self.model, 
+                    overlap=0.5
+                )
+            except RuntimeError as e:
+                if 'out of memory' in str(e).lower():
+                    print("CUDA OOM during sliding window inference. Try reducing roi_size or sw_batch_size.")
+                raise
             probabilities = torch.sigmoid(output)
             predictions = self.post_transforms(output)
-        
         return predictions, probabilities
     
     def visualize_slice(self, 
