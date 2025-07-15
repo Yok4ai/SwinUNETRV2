@@ -77,8 +77,8 @@ def run_gradcam(
 ):
     # Load datalist
     datalist = load_datalist(dataset_path)
-    # Use project-specific transforms
-    train_tfms, val_tfms = get_transforms(img_size=96)  # Use val_tfms for test
+    # Use project-specific transforms, always with img_size=96 for compatibility
+    train_tfms, val_tfms = get_transforms(img_size=96)
     from monai.data import Dataset, DataLoader
     dataset = Dataset(data=datalist, transform=val_tfms)
     loader = DataLoader(dataset, batch_size=1)
