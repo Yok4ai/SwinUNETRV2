@@ -13,217 +13,221 @@ import os
 import sys
 import warnings
 from pathlib import Path
-from typing import Dict, Optional
-
-import matplotlib.pyplot as plt
+from typing import Dict, Optional, Tuple, List, Union
 import numpy as np
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import nibabel as nib
 from monai.transforms import (
     Compose,
     LoadImaged,
-    ToTensord,
-    Spacingd,
-    Orientationd,
-    CropForegroundd,
-    NormalizeIntensityd,
-    CenterSpatialCropd,
     EnsureChannelFirstd,
+    Orientationd,
+    Spacingd,
+    NormalizeIntensityd,
+    EnsureTyped,
+    Activations,
+    AsDiscrete,
 )
+from monai.data import decollate_batch
+from monai.visualize import GradCAM, OcclusionSensitivity
+from monai.visualize.utils import blend_images, matshow3d
 
-# Add the project root to the path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# Add src to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from src.models.swinunetrplus import SwinUNETR
+from src.models.pipeline import BrainTumorSegmentation
+from src.data.augmentations import get_transforms
+from src.data.convert_labels import ConvertLabels
 
 
-class GradCAM:
-    """GradCAM implementation for 3D medical image segmentation."""
+class SwinUNETRGradCAM:
+    """GradCAM implementation for SwinUNETR using MONAI's built-in GradCAM."""
     
-    def __init__(self, model: nn.Module, target_layer_name: str = "swinViT.layers4.0.attn"):
+    def __init__(self, model: nn.Module, target_layers: List[str] = ["encoder4"]):
+        """
+        Initialize GradCAM for SwinUNETR.
+        
+        Args:
+            model: SwinUNETR model
+            target_layers: List of target layer names for GradCAM
+        """
         self.model = model
-        self.target_layer_name = target_layer_name
-        self.gradients = None
-        self.activations = None
-        self.hooks = []
-        self._register_hooks()
-    
-    def _register_hooks(self):
-        """Register forward and backward hooks for gradient capture."""
-        def forward_hook(module, input, output):
-            self.activations = output
-        
-        def backward_hook(module, grad_input, grad_output):
-            self.gradients = grad_output[0]
-        
-        # Navigate to target layer
-        try:
-            target_layer = self.model
-            for name in self.target_layer_name.split('.'):
-                target_layer = getattr(target_layer, name)
-            
-            self.hooks.append(target_layer.register_forward_hook(forward_hook))
-            self.hooks.append(target_layer.register_backward_hook(backward_hook))
-        except AttributeError as e:
-            print(f"Warning: Could not find target layer {self.target_layer_name}: {e}")
-            # Fallback to first available attention layer
-            for name, module in self.model.named_modules():
-                if 'attn' in name:
-                    print(f"Using fallback layer: {name}")
-                    self.hooks.append(module.register_forward_hook(forward_hook))
-                    self.hooks.append(module.register_backward_hook(backward_hook))
-                    break
-    
-    def generate_cam(self, input_tensor: torch.Tensor, class_idx: int = 0) -> np.ndarray:
-        """Generate GradCAM heatmap for the specified class."""
         self.model.eval()
+        self.target_layers = target_layers
         
-        # Forward pass
-        output = self.model(input_tensor)
+        # Initialize MONAI GradCAM for each target layer
+        self.gradcams = {}
+        for layer_name in target_layers:
+            try:
+                self.gradcams[layer_name] = GradCAM(nn_module=model, target_layers=layer_name)
+            except Exception as e:
+                print(f"Warning: Could not create GradCAM for layer {layer_name}: {e}")
+                print("Available layers:")
+                for name, _ in model.named_modules():
+                    print(f"  {name}")
+    
+    def generate_cam(self, input_tensor: torch.Tensor, class_idx: int = 0, layer_name: str = None) -> torch.Tensor:
+        """
+        Generate GradCAM for given input.
         
-        # Check if gradients and activations are captured
-        if self.gradients is None or self.activations is None:
-            print("Warning: No gradients or activations captured. Returning dummy heatmap.")
-            return np.random.rand(96, 96, 96)
+        Args:
+            input_tensor: Input tensor of shape (1, C, D, H, W)
+            class_idx: Target class index
+            layer_name: Specific layer to use (if None, uses first available)
+            
+        Returns:
+            CAM tensor
+        """
+        if layer_name is None:
+            layer_name = self.target_layers[0]
         
-        # Backward pass
-        self.model.zero_grad()
-        class_loss = output[0, class_idx].sum()
-        class_loss.backward()
-        
-        # Check gradients again after backward pass
-        if self.gradients is None:
-            print("Warning: No gradients after backward pass. Returning dummy heatmap.")
-            return np.random.rand(96, 96, 96)
+        if layer_name not in self.gradcams:
+            print(f"Layer {layer_name} not available. Available layers: {list(self.gradcams.keys())}")
+            return torch.zeros_like(input_tensor[0, 0])
         
         try:
-            # Generate CAM
-            pooled_gradients = torch.mean(self.gradients, dim=[0, 2, 3, 4])
-            
-            # Weight the channels by corresponding gradients
-            for i in range(self.activations.shape[1]):
-                self.activations[:, i, :, :, :] *= pooled_gradients[i]
-            
-            # Average the channels of the activations
-            heatmap = torch.mean(self.activations, dim=1).squeeze()
-            
-            # ReLU on top of the heatmap
-            heatmap = F.relu(heatmap)
-            
-            # Normalize to 0-1
-            heatmap = heatmap / torch.max(heatmap)
-            
-            return heatmap.detach().cpu().numpy()
-            
+            # Generate GradCAM using MONAI
+            cam = self.gradcams[layer_name](x=input_tensor, class_idx=class_idx)
+            return cam.squeeze().cpu()
         except Exception as e:
-            print(f"Error in GradCAM generation: {e}")
-            print(f"Gradients shape: {self.gradients.shape if self.gradients is not None else 'None'}")
-            print(f"Activations shape: {self.activations.shape if self.activations is not None else 'None'}")
-            # Return dummy heatmap
-            return np.random.rand(96, 96, 96)
-    
-    def cleanup(self):
-        """Remove hooks to avoid memory leaks."""
-        for hook in self.hooks:
-            hook.remove()
+            print(f"Error generating GradCAM: {e}")
+            return torch.zeros_like(input_tensor[0, 0])
 
 
 class AttentionRollout:
-    """Attention rollout visualization for SwinUNETR."""
+    """Attention rollout implementation for SwinUNETR."""
     
-    def __init__(self, model: nn.Module, head_fusion: str = "mean"):
+    def __init__(self, model: nn.Module):
+        """
+        Initialize attention rollout.
+        
+        Args:
+            model: SwinUNETR model
+        """
         self.model = model
-        self.head_fusion = head_fusion
+        self.model.eval()
         self.attention_maps = []
-        self.hooks = []
         self._register_hooks()
     
     def _register_hooks(self):
         """Register hooks to capture attention maps."""
         def attention_hook(module, input, output):
-            # For Swin Transformer, attention weights are typically the second output
-            if isinstance(output, tuple) and len(output) > 1:
-                attn_weights = output[1]
-            else:
-                attn_weights = output
-            
-            self.attention_maps.append(attn_weights.detach())
+            if hasattr(module, 'attention_weights'):
+                self.attention_maps.append(module.attention_weights)
         
-        # Register hooks for all attention layers
+        # Register hooks on attention modules
         for name, module in self.model.named_modules():
-            if 'attn' in name and hasattr(module, 'forward'):
-                self.hooks.append(module.register_forward_hook(attention_hook))
+            if 'attn' in name.lower() or 'attention' in name.lower():
+                module.register_forward_hook(attention_hook)
     
-    def generate_rollout(self, input_tensor: torch.Tensor, layer_idx: int = -1) -> np.ndarray:
-        """Generate attention rollout for visualization."""
-        self.attention_maps = []
-        self.model.eval()
+    def generate_rollout(self, input_tensor: torch.Tensor, head_fusion: str = "mean") -> torch.Tensor:
+        """
+        Generate attention rollout.
         
+        Args:
+            input_tensor: Input tensor of shape (1, C, D, H, W)
+            head_fusion: How to fuse attention heads ("mean", "max", "min")
+            
+        Returns:
+            Rollout attention map
+        """
+        self.attention_maps = []
+        
+        # Forward pass
         with torch.no_grad():
             _ = self.model(input_tensor)
         
         if not self.attention_maps:
-            warnings.warn("No attention maps captured. Check hook registration.")
-            return np.zeros((96, 96, 96))
+            # Fallback: Use gradient-based attention for transformer blocks
+            return self._compute_gradient_attention(input_tensor)
         
-        # Select attention map from specified layer
-        if layer_idx >= len(self.attention_maps):
-            layer_idx = -1
+        # Compute attention rollout
+        rollout = self._compute_rollout(self.attention_maps, head_fusion)
+        return rollout
+    
+    def _compute_gradient_attention(self, input_tensor: torch.Tensor) -> torch.Tensor:
+        """Compute gradient-based attention as fallback."""
+        input_tensor.requires_grad_(True)
+        output = self.model(input_tensor)
         
-        attention_map = self.attention_maps[layer_idx]
+        # Sum all output channels
+        target_score = output.sum()
+        target_score.backward()
+        
+        # Use input gradients as attention
+        attention = torch.abs(input_tensor.grad).mean(dim=1)  # Average across channels
+        attention = attention / (attention.max() + 1e-8)
+        
+        return attention.squeeze().detach().cpu()
+    
+    def _compute_rollout(self, attention_maps: List[torch.Tensor], head_fusion: str) -> torch.Tensor:
+        """Compute attention rollout from attention maps."""
+        if not attention_maps:
+            return torch.zeros(1)
         
         # Fuse attention heads
-        if self.head_fusion == "mean":
-            attention_map = attention_map.mean(dim=1)
-        elif self.head_fusion == "max":
-            attention_map = attention_map.max(dim=1)[0]
-        elif self.head_fusion == "min":
-            attention_map = attention_map.min(dim=1)[0]
+        fused_attentions = []
+        for attn_map in attention_maps:
+            if head_fusion == "mean":
+                fused = attn_map.mean(dim=1)
+            elif head_fusion == "max":
+                fused = attn_map.max(dim=1)[0]
+            elif head_fusion == "min":
+                fused = attn_map.min(dim=1)[0]
+            else:
+                fused = attn_map.mean(dim=1)
+            
+            fused_attentions.append(fused)
         
-        # Average across batch dimension
-        attention_map = attention_map.mean(dim=0)
+        # Roll out attention through layers
+        rollout = fused_attentions[0]
+        for attn in fused_attentions[1:]:
+            rollout = torch.matmul(rollout, attn)
         
-        # Normalize
-        attention_map = attention_map / attention_map.max()
-        
-        return attention_map.cpu().numpy()
-    
-    def cleanup(self):
-        """Remove hooks to avoid memory leaks."""
-        for hook in self.hooks:
-            hook.remove()
+        return rollout.detach().cpu()
 
 
 class SwinUNETRVisualizer:
-    """Main visualization class for SwinUNETR model analysis."""
+    """Main visualization class for SwinUNETR."""
     
-    def __init__(self, checkpoint_path: str, device: str = "cuda"):
-        self.device = device
-        self.checkpoint_path = checkpoint_path
-        self.model = None
-        self.gradcam = None
-        self.attention_rollout = None
+    def __init__(self, model_path: str, device: str = "cuda" if torch.cuda.is_available() else "cpu"):
+        """
+        Initialize visualizer.
         
-        # Load model
-        self._load_model()
+        Args:
+            model_path: Path to model checkpoint
+            device: Device to run on
+        """
+        self.device = device
+        self.model = self._load_model(model_path)
         
         # Initialize visualization tools
-        self._initialize_visualizers()
+        target_layers = ["encoder4", "encoder3", "encoder2", "swinViT.layers4.0"]
+        self.gradcam = SwinUNETRGradCAM(self.model, target_layers=target_layers)
+        self.attention_rollout = AttentionRollout(self.model)
+        
+        # Initialize occlusion sensitivity
+        self.occlusion_sensitivity = OcclusionSensitivity(
+            nn_module=self.model,
+            mask_size=8,
+            n_batch=4,
+            mode='gaussian'
+        )
+        
+        # Post-processing transforms
+        self.post_transforms = Compose([
+            Activations(sigmoid=True),
+            AsDiscrete(threshold=0.5)
+        ])
     
-    def _load_model(self):
-        """Load the trained SwinUNETR model from checkpoint."""
-        print(f"Loading model from {self.checkpoint_path}")
-        
-        # Check if checkpoint exists
-        if not os.path.exists(self.checkpoint_path):
-            raise FileNotFoundError(f"Checkpoint not found: {self.checkpoint_path}")
-        
-        # Load checkpoint
-        checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
-        
-        # Initialize model with the same configuration as training
-        self.model = SwinUNETR(
+    def _load_model(self, model_path: str) -> nn.Module:
+        """Load model from checkpoint."""
+        # Create model
+        model = SwinUNETR(
             in_channels=4,
             out_channels=3,
             feature_size=48,
@@ -232,288 +236,393 @@ class SwinUNETRVisualizer:
             spatial_dims=3,
             depths=(2, 2, 2, 2),
             num_heads=(3, 6, 12, 24),
-            norm_name="instance",
-            drop_rate=0.0,
-            attn_drop_rate=0.0,
-            dropout_path_rate=0.0,
             downsample="mergingv2",
         )
         
-        # Load state dict
-        if isinstance(checkpoint, dict):
+        # Load weights
+        if os.path.exists(model_path):
+            checkpoint = torch.load(model_path, map_location=self.device)
             if 'state_dict' in checkpoint:
-                state_dict = checkpoint['state_dict']
-                # Remove 'model.' prefix if present
-                if any(k.startswith('model.') for k in state_dict.keys()):
-                    state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
+                model.load_state_dict(checkpoint['state_dict'])
             else:
-                state_dict = checkpoint
+                model.load_state_dict(checkpoint)
+            print(f"Loaded model from {model_path}")
         else:
-            state_dict = checkpoint
+            print(f"Warning: Model file {model_path} not found. Using random weights.")
         
-        self.model.load_state_dict(state_dict, strict=False)
-        self.model.to(self.device)
-        self.model.eval()
-        
-        print("Model loaded successfully!")
+        model.to(self.device)
+        model.eval()
+        return model
     
-    def _initialize_visualizers(self):
-        """Initialize GradCAM and attention rollout visualizers."""
-        # GradCAM for different layers
-        self.gradcam = GradCAM(self.model, target_layer_name="swinViT.layers4.0.attn")
+    def load_and_preprocess(self, data_path: str) -> Tuple[torch.Tensor, Dict]:
+        """Load and preprocess input data."""
+        # Handle different input formats
+        if data_path.endswith('.nii') or data_path.endswith('.nii.gz'):
+            # Single NIfTI file
+            img = nib.load(data_path)
+            data = img.get_fdata()
+            
+            # Convert to tensor and add batch/channel dimensions
+            data = torch.from_numpy(data).float()
+            if data.dim() == 3:
+                data = data.unsqueeze(0).unsqueeze(0)  # Add batch and channel dims
+            elif data.dim() == 4:
+                data = data.unsqueeze(0)  # Add batch dim
+            
+            # Normalize
+            data = (data - data.mean()) / (data.std() + 1e-8)
+            
+            metadata = {"spacing": img.header.get_zooms()[:3], "shape": data.shape}
+            
+        else:
+            # Directory with multiple modalities
+            data_dir = Path(data_path)
+            if data_dir.is_dir():
+                # Look for BraTS format files
+                modalities = []
+                for suffix in ['t1.nii.gz', 't1c.nii.gz', 't2.nii.gz', 'flair.nii.gz']:
+                    file_path = data_dir / f"{data_dir.name}-{suffix}"
+                    if not file_path.exists():
+                        # Try alternative naming
+                        file_path = list(data_dir.glob(f"*{suffix}"))[0] if list(data_dir.glob(f"*{suffix}")) else None
+                    
+                    if file_path and file_path.exists():
+                        img = nib.load(file_path)
+                        modalities.append(torch.from_numpy(img.get_fdata()).float())
+                
+                if len(modalities) == 4:
+                    data = torch.stack(modalities, dim=0).unsqueeze(0)  # (1, 4, D, H, W)
+                    # Normalize each modality
+                    for i in range(4):
+                        data[0, i] = (data[0, i] - data[0, i].mean()) / (data[0, i].std() + 1e-8)
+                    
+                    metadata = {"spacing": img.header.get_zooms()[:3], "shape": data.shape}
+                else:
+                    raise ValueError(f"Expected 4 modalities, found {len(modalities)}")
+            else:
+                raise ValueError(f"Data path {data_path} not found")
+        
+        return data.to(self.device), metadata
+    
+    def predict(self, input_tensor: torch.Tensor) -> torch.Tensor:
+        """Make prediction."""
+        with torch.no_grad():
+            output = self.model(input_tensor)
+            probabilities = torch.sigmoid(output)
+            predictions = self.post_transforms(output)
+        
+        return predictions, probabilities
+    
+    def visualize_slice(self, 
+                       input_tensor: torch.Tensor, 
+                       predictions: torch.Tensor,
+                       gradcam: torch.Tensor,
+                       attention: torch.Tensor,
+                       slice_idx: int,
+                       save_path: str = None) -> None:
+        """Visualize a single slice with all visualizations."""
+        # Extract slice
+        img_slice = input_tensor[0, 0, :, :, slice_idx].cpu().numpy()  # First modality
+        pred_slice = predictions[0, :, :, :, slice_idx].cpu().numpy()
+        gradcam_slice = gradcam[:, :, slice_idx].cpu().numpy()
+        attention_slice = attention[:, :, slice_idx].cpu().numpy() if attention.dim() == 3 else attention.cpu().numpy()
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        
+        # Original image
+        axes[0, 0].imshow(img_slice, cmap='gray')
+        axes[0, 0].set_title('Original Image (T1)')
+        axes[0, 0].axis('off')
+        
+        # Predictions overlaid
+        axes[0, 1].imshow(img_slice, cmap='gray')
+        colors = ['red', 'green', 'blue']
+        labels = ['TC', 'WT', 'ET']
+        for i in range(3):
+            mask = pred_slice[i] > 0.5
+            if mask.any():
+                axes[0, 1].contour(mask, colors=[colors[i]], linewidths=2)
+        axes[0, 1].set_title('Predictions Overlay')
+        axes[0, 1].axis('off')
+        
+        # Individual predictions
+        axes[0, 2].imshow(pred_slice.sum(axis=0), cmap='viridis')
+        axes[0, 2].set_title('Combined Predictions')
+        axes[0, 2].axis('off')
+        
+        # GradCAM
+        axes[1, 0].imshow(img_slice, cmap='gray')
+        axes[1, 0].imshow(gradcam_slice, cmap='jet', alpha=0.5)
+        axes[1, 0].set_title('GradCAM Overlay')
+        axes[1, 0].axis('off')
         
         # Attention rollout
-        self.attention_rollout = AttentionRollout(self.model, head_fusion="mean")
+        axes[1, 1].imshow(img_slice, cmap='gray')
+        axes[1, 1].imshow(attention_slice, cmap='hot', alpha=0.5)
+        axes[1, 1].set_title('Attention Rollout')
+        axes[1, 1].axis('off')
+        
+        # Combined visualization
+        axes[1, 2].imshow(img_slice, cmap='gray')
+        axes[1, 2].imshow(gradcam_slice, cmap='jet', alpha=0.3)
+        axes[1, 2].imshow(attention_slice, cmap='hot', alpha=0.3)
+        axes[1, 2].set_title('Combined Visualization')
+        axes[1, 2].axis('off')
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Saved visualization to {save_path}")
+        
+        plt.show()
     
-    def get_transforms(self):
-        """Get preprocessing transforms for input data."""
-        # Simplified transforms for single file loading
-        return Compose([
-            LoadImaged(keys=["image"]),
-            EnsureChannelFirstd(keys=["image"]),
-            CenterSpatialCropd(keys=["image"], roi_size=[96, 96, 96]),
-            ToTensord(keys=["image"]),
-        ])
-    
-    def load_sample_data(self, data_path: str) -> torch.Tensor:
-        """Load and preprocess sample data."""
-        print(f"Error loading sample data: Sample data loading not implemented for single files")
-        print("Creating dummy 4-channel data for demonstration")
-        # Create dummy 4-channel data (FLAIR, T1, T1ce, T2)
-        dummy_data = torch.randn(1, 4, 96, 96, 96).to(self.device)
-        return dummy_data
-    
-    def visualize_gradcam(self, input_tensor: torch.Tensor, class_idx: int = 0, 
-                         slice_idx: Optional[int] = None) -> Dict[str, np.ndarray]:
-        """Generate GradCAM visualizations."""
-        print(f"Generating GradCAM for class {class_idx}")
-        
-        # Generate GradCAM
-        heatmap = self.gradcam.generate_cam(input_tensor, class_idx)
-        
-        # Select middle slice if not specified
-        if slice_idx is None:
-            slice_idx = heatmap.shape[2] // 2
-        
-        # Extract slices for visualization
-        results = {}
-        for axis, axis_name in enumerate(['sagittal', 'coronal', 'axial']):
-            if axis == 0:  # Sagittal
-                slice_data = heatmap[slice_idx, :, :]
-            elif axis == 1:  # Coronal
-                slice_data = heatmap[:, slice_idx, :]
-            else:  # Axial
-                slice_data = heatmap[:, :, slice_idx]
-            
-            results[axis_name] = slice_data
-        
-        return results
-    
-    def visualize_attention_rollout(self, input_tensor: torch.Tensor, 
-                                  layer_idx: int = -1, slice_idx: Optional[int] = None) -> Dict[str, np.ndarray]:
-        """Generate attention rollout visualizations."""
-        print(f"Generating attention rollout for layer {layer_idx}")
-        
-        # Generate attention rollout
-        attention_map = self.attention_rollout.generate_rollout(input_tensor, layer_idx)
-        
-        # Handle different shapes
-        if attention_map.ndim == 2:
-            # 2D attention map - need to reshape or expand
-            # For now, create a simple 3D version
-            attention_map = np.expand_dims(attention_map, axis=2)
-            attention_map = np.repeat(attention_map, 96, axis=2)
-        elif attention_map.ndim == 1:
-            # 1D attention map - reshape to 3D
-            size = int(np.cbrt(attention_map.shape[0]))
-            if size ** 3 == attention_map.shape[0]:
-                attention_map = attention_map.reshape(size, size, size)
-            else:
-                # Fallback: create dummy 3D map
-                attention_map = np.random.rand(96, 96, 96)
-        
-        # Ensure 3D
-        if attention_map.ndim != 3:
-            attention_map = np.random.rand(96, 96, 96)
-        
-        # Select middle slice if not specified
-        if slice_idx is None:
-            slice_idx = attention_map.shape[2] // 2
-        
-        # Extract slices for visualization
-        results = {}
-        for axis, axis_name in enumerate(['sagittal', 'coronal', 'axial']):
-            if axis == 0:  # Sagittal
-                slice_data = attention_map[slice_idx, :, :]
-            elif axis == 1:  # Coronal
-                slice_data = attention_map[:, slice_idx, :]
-            else:  # Axial
-                slice_data = attention_map[:, :, slice_idx]
-            
-            results[axis_name] = slice_data
-        
-        return results
-    
-    def create_overlay_visualization(self, input_slice: np.ndarray, heatmap: np.ndarray, 
-                                   alpha: float = 0.5) -> np.ndarray:
-        """Create overlay visualization of input and heatmap."""
-        # Normalize input slice
-        input_norm = (input_slice - input_slice.min()) / (input_slice.max() - input_slice.min() + 1e-8)
-        
-        # Create colormap for heatmap
-        cmap = plt.cm.jet
-        heatmap_colored = cmap(heatmap)[:, :, :3]  # Remove alpha channel
-        
-        # Create overlay
-        overlay = alpha * heatmap_colored + (1 - alpha) * np.stack([input_norm] * 3, axis=2)
-        
-        return np.clip(overlay, 0, 1)
-    
-    def save_visualizations(self, input_tensor: torch.Tensor, output_dir: str = "visualizations"):
-        """Generate and save all visualizations."""
+    def generate_all_visualizations(self, 
+                                  input_tensor: torch.Tensor, 
+                                  output_dir: str = "visualizations") -> Dict:
+        """Generate all visualizations for the input."""
         os.makedirs(output_dir, exist_ok=True)
         
-        # Ensure input tensor has correct shape [B, C, D, H, W]
-        if input_tensor.dim() != 5:
-            raise ValueError(f"Expected 5D input tensor [B, C, D, H, W], got {input_tensor.dim()}D")
+        # Make predictions
+        predictions, probabilities = self.predict(input_tensor)
         
-        if input_tensor.shape[1] != 4:
-            raise ValueError(f"Expected 4 input channels, got {input_tensor.shape[1]}")
-        
-        # Get input slice for overlay (use first modality)
-        input_slice = input_tensor[0, 0, :, :, input_tensor.shape[4] // 2].cpu().numpy()
-        
-        # Generate GradCAM for all classes
-        for class_idx in range(3):  # TC, WT, ET
-            class_names = ['TC', 'WT', 'ET']
-            gradcam_results = self.visualize_gradcam(input_tensor, class_idx)
+        # Generate visualizations for each class
+        results = {}
+        for class_idx in range(3):
+            class_name = ['TC', 'WT', 'ET'][class_idx]
             
-            for view, heatmap in gradcam_results.items():
-                # Create overlay
-                overlay = self.create_overlay_visualization(input_slice, heatmap)
-                
-                # Save
-                try:
-                    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-                    
-                    # Original
-                    axes[0].imshow(input_slice, cmap='gray')
-                    axes[0].set_title(f'Original ({view})')
-                    axes[0].axis('off')
-                    
-                    # Heatmap
-                    im = axes[1].imshow(heatmap, cmap='jet')
-                    axes[1].set_title(f'GradCAM - {class_names[class_idx]}')
-                    axes[1].axis('off')
-                    plt.colorbar(im, ax=axes[1])
-                    
-                    # Overlay
-                    axes[2].imshow(overlay)
-                    axes[2].set_title(f'Overlay - {class_names[class_idx]}')
-                    axes[2].axis('off')
-                    
-                    plt.tight_layout()
-                    plt.savefig(f"{output_dir}/gradcam_{class_names[class_idx].lower()}_{view}.png", dpi=300, bbox_inches='tight')
-                    plt.close()
-                    
-                except Exception as e:
-                    print(f"Error saving GradCAM visualization: {e}")
-                    plt.close('all')  # Clean up any open figures
-        
-        # Generate attention rollout
-        attention_results = self.visualize_attention_rollout(input_tensor)
-        
-        for view, attention_map in attention_results.items():
-            # Create overlay
-            overlay = self.create_overlay_visualization(input_slice, attention_map)
+            # GradCAM for different layers
+            gradcam_maps = {}
+            for layer_name in self.gradcam.target_layers:
+                if layer_name in self.gradcam.gradcams:
+                    gradcam_maps[layer_name] = self.gradcam.generate_cam(
+                        input_tensor, class_idx, layer_name
+                    )
             
-            # Save
+            # Attention rollout
+            attention = self.attention_rollout.generate_rollout(input_tensor)
+            
+            # Occlusion sensitivity
             try:
-                fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-                
-                # Original
-                axes[0].imshow(input_slice, cmap='gray')
-                axes[0].set_title(f'Original ({view})')
-                axes[0].axis('off')
-                
-                # Attention map
-                im = axes[1].imshow(attention_map, cmap='viridis')
-                axes[1].set_title(f'Attention Rollout')
-                axes[1].axis('off')
-                plt.colorbar(im, ax=axes[1])
-                
-                # Overlay
-                axes[2].imshow(overlay)
-                axes[2].set_title(f'Attention Overlay')
-                axes[2].axis('off')
-                
-                plt.tight_layout()
-                plt.savefig(f"{output_dir}/attention_rollout_{view}.png", dpi=300, bbox_inches='tight')
-                plt.close()
-                
+                occ_map, _ = self.occlusion_sensitivity(input_tensor)
+                occlusion = occ_map[0, :, :, :, class_idx].cpu()
             except Exception as e:
-                print(f"Error saving attention rollout visualization: {e}")
-                plt.close('all')  # Clean up any open figures
+                print(f"Warning: Could not compute occlusion sensitivity for {class_name}: {e}")
+                occlusion = torch.zeros_like(input_tensor[0, 0])
+            
+            results[class_name] = {
+                'gradcam_maps': gradcam_maps,
+                'attention': attention,
+                'occlusion': occlusion,
+                'predictions': predictions[0, class_idx],
+                'probabilities': probabilities[0, class_idx]
+            }
         
-        print(f"Visualizations saved to {output_dir}/")
+        # Save visualizations for middle slices
+        depth = input_tensor.shape[4]
+        middle_slices = [depth // 4, depth // 2, 3 * depth // 4]
+        
+        for slice_idx in middle_slices:
+            for class_idx, class_name in enumerate(['TC', 'WT', 'ET']):
+                save_path = os.path.join(output_dir, f"{class_name}_slice_{slice_idx}.png")
+                self.visualize_slice_comprehensive(
+                    input_tensor, 
+                    predictions,
+                    results[class_name],
+                    slice_idx,
+                    save_path
+                )
+        
+        # Generate 3D visualizations using MONAI's matshow3d
+        self.generate_3d_visualizations(input_tensor, results, output_dir)
+        
+        return results
     
-    def cleanup(self):
-        """Clean up resources."""
-        if self.gradcam:
-            self.gradcam.cleanup()
-        if self.attention_rollout:
-            self.attention_rollout.cleanup()
+    def visualize_slice_comprehensive(self, 
+                                    input_tensor: torch.Tensor, 
+                                    predictions: torch.Tensor,
+                                    class_results: Dict,
+                                    slice_idx: int,
+                                    save_path: str = None) -> None:
+        """Comprehensive visualization with multiple techniques."""
+        # Extract slice
+        img_slice = input_tensor[0, 0, :, :, slice_idx].cpu().numpy()  # T1 modality
+        pred_slice = predictions[0, :, :, :, slice_idx].cpu().numpy()
+        
+        # Get the first available GradCAM map
+        gradcam_slice = None
+        for layer_name, gradcam_map in class_results['gradcam_maps'].items():
+            if gradcam_map.dim() == 3:
+                gradcam_slice = gradcam_map[:, :, slice_idx].cpu().numpy()
+                break
+        
+        attention_slice = class_results['attention'][:, :, slice_idx].cpu().numpy() if class_results['attention'].dim() == 3 else class_results['attention'].cpu().numpy()
+        occlusion_slice = class_results['occlusion'][:, :, slice_idx].cpu().numpy() if class_results['occlusion'].dim() == 3 else class_results['occlusion'].cpu().numpy()
+        
+        # Create comprehensive visualization
+        fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+        
+        # Original image
+        axes[0, 0].imshow(img_slice, cmap='gray')
+        axes[0, 0].set_title('Original Image (T1)')
+        axes[0, 0].axis('off')
+        
+        # Prediction overlay
+        axes[0, 1].imshow(img_slice, cmap='gray')
+        if pred_slice.sum() > 0:
+            axes[0, 1].contour(pred_slice.sum(axis=0), colors=['red'], linewidths=2)
+        axes[0, 1].set_title('Prediction Overlay')
+        axes[0, 1].axis('off')
+        
+        # GradCAM
+        axes[0, 2].imshow(img_slice, cmap='gray')
+        if gradcam_slice is not None:
+            axes[0, 2].imshow(gradcam_slice, cmap='jet', alpha=0.5)
+        axes[0, 2].set_title('GradCAM')
+        axes[0, 2].axis('off')
+        
+        # Attention
+        axes[0, 3].imshow(img_slice, cmap='gray')
+        axes[0, 3].imshow(attention_slice, cmap='hot', alpha=0.5)
+        axes[0, 3].set_title('Attention')
+        axes[0, 3].axis('off')
+        
+        # Occlusion sensitivity
+        axes[1, 0].imshow(img_slice, cmap='gray')
+        axes[1, 0].imshow(occlusion_slice, cmap='coolwarm', alpha=0.5)
+        axes[1, 0].set_title('Occlusion Sensitivity')
+        axes[1, 0].axis('off')
+        
+        # Blended visualization using MONAI's blend_images
+        try:
+            # Convert to CHW format for MONAI
+            img_chw = torch.from_numpy(img_slice).unsqueeze(0)
+            pred_chw = torch.from_numpy(pred_slice.sum(axis=0)).unsqueeze(0)
+            blended = blend_images(img_chw, pred_chw, alpha=0.5)
+            axes[1, 1].imshow(blended.squeeze().numpy(), cmap='viridis')
+            axes[1, 1].set_title('MONAI Blended')
+        except Exception as e:
+            axes[1, 1].imshow(img_slice, cmap='gray')
+            axes[1, 1].set_title('Blended (Error)')
+        axes[1, 1].axis('off')
+        
+        # Combined visualization
+        axes[1, 2].imshow(img_slice, cmap='gray')
+        if gradcam_slice is not None:
+            axes[1, 2].imshow(gradcam_slice, cmap='jet', alpha=0.3)
+        axes[1, 2].imshow(attention_slice, cmap='hot', alpha=0.3)
+        axes[1, 2].set_title('Combined')
+        axes[1, 2].axis('off')
+        
+        # Probability heatmap
+        prob_slice = class_results['probabilities'][:, :, slice_idx].cpu().numpy()
+        axes[1, 3].imshow(prob_slice, cmap='plasma')
+        axes[1, 3].set_title('Probability Map')
+        axes[1, 3].axis('off')
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Saved comprehensive visualization to {save_path}")
+        
+        plt.close()
+    
+    def generate_3d_visualizations(self, input_tensor: torch.Tensor, results: Dict, output_dir: str) -> None:
+        """Generate 3D visualizations using MONAI's matshow3d."""
+        for class_name, data in results.items():
+            # Create 3D visualization for each visualization type
+            for viz_type in ['gradcam_maps', 'attention', 'occlusion']:
+                try:
+                    if viz_type == 'gradcam_maps':
+                        # Use the first available GradCAM map
+                        for layer_name, gradcam_map in data['gradcam_maps'].items():
+                            if gradcam_map.dim() == 3:
+                                fig = plt.figure(figsize=(15, 10))
+                                matshow3d(gradcam_map.numpy(), fig=fig, 
+                                         title=f'{class_name} GradCAM - {layer_name}')
+                                save_path = os.path.join(output_dir, f'{class_name}_gradcam_{layer_name}_3d.png')
+                                plt.savefig(save_path, dpi=300, bbox_inches='tight')
+                                plt.close()
+                                break
+                    else:
+                        viz_data = data[viz_type]
+                        if viz_data.dim() == 3:
+                            fig = plt.figure(figsize=(15, 10))
+                            matshow3d(viz_data.numpy(), fig=fig, 
+                                     title=f'{class_name} {viz_type.capitalize()}')
+                            save_path = os.path.join(output_dir, f'{class_name}_{viz_type}_3d.png')
+                            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+                            plt.close()
+                except Exception as e:
+                    print(f"Error generating 3D visualization for {class_name} {viz_type}: {e}")
+    
+    def save_attention_maps(self, results: Dict, output_dir: str) -> None:
+        """Save attention maps as NIfTI files."""
+        for class_name, data in results.items():
+            # Save GradCAM maps
+            for layer_name, gradcam_map in data['gradcam_maps'].items():
+                if gradcam_map.dim() == 3:
+                    gradcam_path = os.path.join(output_dir, f"{class_name}_gradcam_{layer_name}.nii.gz")
+                    gradcam_img = nib.Nifti1Image(gradcam_map.numpy(), affine=np.eye(4))
+                    nib.save(gradcam_img, gradcam_path)
+            
+            # Save attention rollout
+            attention_path = os.path.join(output_dir, f"{class_name}_attention.nii.gz")
+            attention_data = data['attention']
+            if attention_data.dim() == 2:
+                # If attention is 2D, expand to 3D by repeating the 2D map
+                attention_data = attention_data.unsqueeze(-1).repeat(1, 1, 96)  # Assume 96 depth
+            attention_img = nib.Nifti1Image(attention_data.numpy(), affine=np.eye(4))
+            nib.save(attention_img, attention_path)
+            
+            # Save occlusion sensitivity
+            occlusion_path = os.path.join(output_dir, f"{class_name}_occlusion.nii.gz")
+            occlusion_data = data['occlusion']
+            if occlusion_data.dim() == 3:
+                occlusion_img = nib.Nifti1Image(occlusion_data.numpy(), affine=np.eye(4))
+                nib.save(occlusion_img, occlusion_path)
+            
+            print(f"Saved {class_name} attention maps to {output_dir}")
 
 
 def main():
     """Main function for standalone execution."""
     parser = argparse.ArgumentParser(description="SwinUNETR Visualization Tool")
     parser.add_argument("--checkpoint_path", type=str, required=True,
-                       help="Path to the model checkpoint (.pth file)")
-    parser.add_argument("--sample_data_path", type=str, required=False,
-                       help="Path to sample data (NIfTI file or directory)")
+                       help="Path to model checkpoint")
+    parser.add_argument("--sample_data_path", type=str, required=True,
+                       help="Path to sample data (directory or single file)")
     parser.add_argument("--output_dir", type=str, default="visualizations",
                        help="Output directory for visualizations")
-    parser.add_argument("--device", type=str, default="cuda",
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
                        help="Device to use (cuda/cpu)")
+    parser.add_argument("--target_layers", nargs="+", default=["encoder4"],
+                       help="Target layers for GradCAM")
     
     args = parser.parse_args()
     
-    # Check if CUDA is available
-    if args.device == "cuda" and not torch.cuda.is_available():
-        print("CUDA not available, using CPU")
-        args.device = "cpu"
+    # Initialize visualizer
+    print(f"Initializing visualizer with checkpoint: {args.checkpoint_path}")
+    visualizer = SwinUNETRVisualizer(args.checkpoint_path, args.device)
     
-    try:
-        # Initialize visualizer
-        visualizer = SwinUNETRVisualizer(args.checkpoint_path, args.device)
-        
-        # Load sample data or create dummy data
-        if args.sample_data_path:
-            print(f"Loading sample data from: {args.sample_data_path}")
-            input_tensor = visualizer.load_sample_data(args.sample_data_path)
-        else:
-            print("No sample data provided, creating dummy 4-channel data")
-            # Create dummy 4-channel data (FLAIR, T1, T1ce, T2)
-            input_tensor = torch.randn(1, 4, 96, 96, 96).to(args.device)
-        
-        print(f"Input tensor shape: {input_tensor.shape}")
-        print(f"Input tensor device: {input_tensor.device}")
-        
-        # Generate visualizations
-        visualizer.save_visualizations(input_tensor, args.output_dir)
-        
-        # Cleanup
-        visualizer.cleanup()
-        
-        print("Visualization complete!")
-        
-    except Exception as e:
-        print(f"Error: {e}")
-        return 1
+    # Load and preprocess data
+    print(f"Loading data from: {args.sample_data_path}")
+    input_tensor, metadata = visualizer.load_and_preprocess(args.sample_data_path)
+    print(f"Data shape: {input_tensor.shape}")
+    print(f"Metadata: {metadata}")
     
-    return 0
+    # Generate visualizations
+    print("Generating visualizations...")
+    results = visualizer.generate_all_visualizations(input_tensor, args.output_dir)
+    
+    # Save attention maps as NIfTI
+    print("Saving attention maps...")
+    visualizer.save_attention_maps(results, args.output_dir)
+    
+    print(f"Visualization complete! Results saved to {args.output_dir}")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
