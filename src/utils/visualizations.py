@@ -64,6 +64,10 @@ def build_model():
         out_channels=3,
         feature_size=48,
         use_checkpoint=True
+        use_v2=True,
+        spatial_dims=3,
+        depths=(2, 2, 2, 2),
+        num_heads=(3, 6, 12, 24),
     )
 
 def load_weights(model, path):
