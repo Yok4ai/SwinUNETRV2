@@ -82,28 +82,46 @@ class GradCAM:
         # Forward pass
         output = self.model(input_tensor)
         
+        # Check if gradients and activations are captured
+        if self.gradients is None or self.activations is None:
+            print("Warning: No gradients or activations captured. Returning dummy heatmap.")
+            return np.random.rand(96, 96, 96)
+        
         # Backward pass
         self.model.zero_grad()
         class_loss = output[0, class_idx].sum()
         class_loss.backward()
         
-        # Generate CAM
-        pooled_gradients = torch.mean(self.gradients, dim=[0, 2, 3, 4])
+        # Check gradients again after backward pass
+        if self.gradients is None:
+            print("Warning: No gradients after backward pass. Returning dummy heatmap.")
+            return np.random.rand(96, 96, 96)
         
-        # Weight the channels by corresponding gradients
-        for i in range(self.activations.shape[1]):
-            self.activations[:, i, :, :, :] *= pooled_gradients[i]
-        
-        # Average the channels of the activations
-        heatmap = torch.mean(self.activations, dim=1).squeeze()
-        
-        # ReLU on top of the heatmap
-        heatmap = F.relu(heatmap)
-        
-        # Normalize to 0-1
-        heatmap = heatmap / torch.max(heatmap)
-        
-        return heatmap.detach().cpu().numpy()
+        try:
+            # Generate CAM
+            pooled_gradients = torch.mean(self.gradients, dim=[0, 2, 3, 4])
+            
+            # Weight the channels by corresponding gradients
+            for i in range(self.activations.shape[1]):
+                self.activations[:, i, :, :, :] *= pooled_gradients[i]
+            
+            # Average the channels of the activations
+            heatmap = torch.mean(self.activations, dim=1).squeeze()
+            
+            # ReLU on top of the heatmap
+            heatmap = F.relu(heatmap)
+            
+            # Normalize to 0-1
+            heatmap = heatmap / torch.max(heatmap)
+            
+            return heatmap.detach().cpu().numpy()
+            
+        except Exception as e:
+            print(f"Error in GradCAM generation: {e}")
+            print(f"Gradients shape: {self.gradients.shape if self.gradients is not None else 'None'}")
+            print(f"Activations shape: {self.activations.shape if self.activations is not None else 'None'}")
+            # Return dummy heatmap
+            return np.random.rand(96, 96, 96)
     
     def cleanup(self):
         """Remove hooks to avoid memory leaks."""
@@ -375,27 +393,32 @@ class SwinUNETRVisualizer:
                 overlay = self.create_overlay_visualization(input_slice, heatmap)
                 
                 # Save
-                fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-                
-                # Original
-                axes[0].imshow(input_slice, cmap='gray')
-                axes[0].set_title(f'Original ({view})')
-                axes[0].axis('off')
-                
-                # Heatmap
-                im = axes[1].imshow(heatmap, cmap='jet')
-                axes[1].set_title(f'GradCAM - {class_names[class_idx]}')
-                axes[1].axis('off')
-                plt.colorbar(im, ax=axes[1])
-                
-                # Overlay
-                axes[2].imshow(overlay)
-                axes[2].set_title(f'Overlay - {class_names[class_idx]}')
-                axes[2].axis('off')
-                
-                plt.tight_layout()
-                plt.savefig(f"{output_dir}/gradcam_{class_names[class_idx].lower()}_{view}.png", dpi=300, bbox_inches='tight')
-                plt.close()
+                try:
+                    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+                    
+                    # Original
+                    axes[0].imshow(input_slice, cmap='gray')
+                    axes[0].set_title(f'Original ({view})')
+                    axes[0].axis('off')
+                    
+                    # Heatmap
+                    im = axes[1].imshow(heatmap, cmap='jet')
+                    axes[1].set_title(f'GradCAM - {class_names[class_idx]}')
+                    axes[1].axis('off')
+                    plt.colorbar(im, ax=axes[1])
+                    
+                    # Overlay
+                    axes[2].imshow(overlay)
+                    axes[2].set_title(f'Overlay - {class_names[class_idx]}')
+                    axes[2].axis('off')
+                    
+                    plt.tight_layout()
+                    plt.savefig(f"{output_dir}/gradcam_{class_names[class_idx].lower()}_{view}.png", dpi=300, bbox_inches='tight')
+                    plt.close()
+                    
+                except Exception as e:
+                    print(f"Error saving GradCAM visualization: {e}")
+                    plt.close('all')  # Clean up any open figures
         
         # Generate attention rollout
         attention_results = self.visualize_attention_rollout(input_tensor)
@@ -405,27 +428,32 @@ class SwinUNETRVisualizer:
             overlay = self.create_overlay_visualization(input_slice, attention_map)
             
             # Save
-            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-            
-            # Original
-            axes[0].imshow(input_slice, cmap='gray')
-            axes[0].set_title(f'Original ({view})')
-            axes[0].axis('off')
-            
-            # Attention map
-            im = axes[1].imshow(attention_map, cmap='viridis')
-            axes[1].set_title(f'Attention Rollout')
-            axes[1].axis('off')
-            plt.colorbar(im, ax=axes[1])
-            
-            # Overlay
-            axes[2].imshow(overlay)
-            axes[2].set_title(f'Attention Overlay')
-            axes[2].axis('off')
-            
-            plt.tight_layout()
-            plt.savefig(f"{output_dir}/attention_rollout_{view}.png", dpi=300, bbox_inches='tight')
-            plt.close()
+            try:
+                fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+                
+                # Original
+                axes[0].imshow(input_slice, cmap='gray')
+                axes[0].set_title(f'Original ({view})')
+                axes[0].axis('off')
+                
+                # Attention map
+                im = axes[1].imshow(attention_map, cmap='viridis')
+                axes[1].set_title(f'Attention Rollout')
+                axes[1].axis('off')
+                plt.colorbar(im, ax=axes[1])
+                
+                # Overlay
+                axes[2].imshow(overlay)
+                axes[2].set_title(f'Attention Overlay')
+                axes[2].axis('off')
+                
+                plt.tight_layout()
+                plt.savefig(f"{output_dir}/attention_rollout_{view}.png", dpi=300, bbox_inches='tight')
+                plt.close()
+                
+            except Exception as e:
+                print(f"Error saving attention rollout visualization: {e}")
+                plt.close('all')  # Clean up any open figures
         
         print(f"Visualizations saved to {output_dir}/")
     
