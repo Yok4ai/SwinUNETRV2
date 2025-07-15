@@ -182,6 +182,9 @@ def run_smoothgrad(
     train_tfms, val_tfms = get_transforms(img_size=96)
     from monai.data import Dataset
     dataset = Dataset(data=datalist, transform=val_tfms)
+    if sample_idx >= len(dataset):
+        print(f"[ERROR] sample_idx {sample_idx} is out of range for dataset of length {len(dataset)}.")
+        return None, None
     model = build_model(img_size=96, in_channels=4, out_channels=3, feature_size=48, use_v2=True)
     model, device = load_weights(model, checkpoint_path)
     model.eval()
@@ -193,7 +196,7 @@ def run_smoothgrad(
         image = F.interpolate(image, size=(96, 96, 96), mode="trilinear", align_corners=False)
     # SmoothGrad
     smooth_grad = SmoothGrad(model, stdev_spread=0.15, n_samples=25, magnitude=True, verbose=True)
-    attributions = smooth_grad(x=image, class_idx=(target_class,))
+    attributions = smooth_grad(x=image, class_idx=target_class)
     attributions = attributions.detach().cpu().numpy()[0]
     input_np = image[0].detach().cpu().numpy()
     mid = input_np.shape[2] // 2
