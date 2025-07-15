@@ -91,6 +91,10 @@ def run_gradcam(
     sample = dataset[sample_idx]
     image = sample["image"].unsqueeze(0).to(device)
 
+    # Force resize to [96, 96, 96] if needed
+    if image.shape[2:] != (96, 96, 96):
+        image = F.interpolate(image, size=(96, 96, 96), mode="trilinear", align_corners=False)
+
     # GradCAM
     gradcam = GradCAM(nn_module=model, target_layers=target_layer)
     cam_raw = gradcam(x=image, class_idx=target_class)
