@@ -173,9 +173,14 @@ def main():
 
     # Optionally visualize attention rollout (mean over heads, middle token)
     if attn_map is not None:
-        attn_np = attn_map[0].mean(0).numpy()
+        # attn_map[0] shape: [N, N] or [num_heads, N, N]
+        attn_np = attn_map[0].numpy()
+        print('Attention map shape:', attn_np.shape)
+        if attn_np.ndim == 3:  # [num_heads, N, N]
+            attn_np = attn_np.mean(0)
+        # Now attn_np should be [N, N] (2D)
         plt.imshow(attn_np, cmap='hot')
-        plt.title('Attention Rollout (mean)')
+        plt.title('Attention Rollout (first block)')
         plt.colorbar()
         plt.show()
 
