@@ -41,7 +41,7 @@ from src.models.swinunetrplus import SwinUNETR
 class GradCAM:
     """GradCAM implementation for 3D medical image segmentation."""
     
-    def __init__(self, model: nn.Module, target_layer_name: str = "swinViT.layers.3.blocks.1.attn"):
+    def __init__(self, model: nn.Module, target_layer_name: str = "swinViT.layers4.0.attn"):
         self.model = model
         self.target_layer_name = target_layer_name
         self.gradients = None
@@ -58,12 +58,22 @@ class GradCAM:
             self.gradients = grad_output[0]
         
         # Navigate to target layer
-        target_layer = self.model
-        for name in self.target_layer_name.split('.'):
-            target_layer = getattr(target_layer, name)
-        
-        self.hooks.append(target_layer.register_forward_hook(forward_hook))
-        self.hooks.append(target_layer.register_backward_hook(backward_hook))
+        try:
+            target_layer = self.model
+            for name in self.target_layer_name.split('.'):
+                target_layer = getattr(target_layer, name)
+            
+            self.hooks.append(target_layer.register_forward_hook(forward_hook))
+            self.hooks.append(target_layer.register_backward_hook(backward_hook))
+        except AttributeError as e:
+            print(f"Warning: Could not find target layer {self.target_layer_name}: {e}")
+            # Fallback to first available attention layer
+            for name, module in self.model.named_modules():
+                if 'attn' in name:
+                    print(f"Using fallback layer: {name}")
+                    self.hooks.append(module.register_forward_hook(forward_hook))
+                    self.hooks.append(module.register_backward_hook(backward_hook))
+                    break
     
     def generate_cam(self, input_tensor: torch.Tensor, class_idx: int = 0) -> np.ndarray:
         """Generate GradCAM heatmap for the specified class."""
@@ -232,7 +242,7 @@ class SwinUNETRVisualizer:
     def _initialize_visualizers(self):
         """Initialize GradCAM and attention rollout visualizers."""
         # GradCAM for different layers
-        self.gradcam = GradCAM(self.model, target_layer_name="swinViT.layers.3.blocks.1.attn")
+        self.gradcam = GradCAM(self.model, target_layer_name="swinViT.layers4.0.attn")
         
         # Attention rollout
         self.attention_rollout = AttentionRollout(self.model, head_fusion="mean")
