@@ -14,8 +14,6 @@ from models.swinunetr import SwinUNETR
 from data.augmentations import get_transforms
 from data.dataloader import get_dataloaders
 from kaggle_setup import prepare_brats_data
-# Add imports for gradient-based saliency
-from monai.visualize.gradient_based import VanillaGrad, GuidedBackpropGrad, SmoothGrad, GuidedBackpropSmoothGrad
 
 set_determinism(42)
 
@@ -122,63 +120,8 @@ def run_gradcam(
     show_cam_overlay(input_np, cam_np, f"Grad-CAM: {class_names[target_class]}", channel_idx=channel_idx, save_path=save_path)
     return input_np, cam_np
 
-def run_saliency(
-    dataset_path,
-    checkpoint_path,
-    sample_idx=0,
-    target_class=1,
-    output_dir=".",
-    channel_idx=3,
-    saliency_method="vanillagrad"
-):
-    # Load datalist
-    datalist = load_datalist(dataset_path)
-    train_tfms, val_tfms = get_transforms(img_size=96)
-    from monai.data import Dataset, DataLoader
-    dataset = Dataset(data=datalist, transform=val_tfms)
-    loader = DataLoader(dataset, batch_size=1)
-
-    # Model
-    model = build_model(img_size=96, in_channels=4, out_channels=3, feature_size=48, use_v2=True)
-    model, device = load_weights(model, checkpoint_path)
-
-    # Get sample
-    sample = dataset[sample_idx]
-    image = sample["image"].unsqueeze(0).to(device)
-    image.requires_grad = True
-
-    # Force resize to [96, 96, 96] if needed
-    if image.shape[2:] != (96, 96, 96):
-        image = F.interpolate(image, size=(96, 96, 96), mode="trilinear", align_corners=False)
-
-    # Select saliency method
-    if saliency_method.lower() == "vanillagrad":
-        saliency = VanillaGrad(model)
-    elif saliency_method.lower() == "guidedbackpropgrad":
-        saliency = GuidedBackpropGrad(model)
-    elif saliency_method.lower() == "smoothgrad":
-        saliency = SmoothGrad(model)
-    elif saliency_method.lower() == "guidedbackpropsmoothgrad":
-        saliency = GuidedBackpropSmoothGrad(model)
-    else:
-        raise ValueError(f"Unknown saliency method: {saliency_method}")
-
-    # Compute saliency map
-    saliency_map = saliency(x=image, class_idx=target_class)
-    # Normalize and resize if needed
-    cam = resize_cam(saliency_map, image.shape[2:])
-
-    # Visualization
-    input_np = image[0].detach().cpu().numpy()
-    cam_np = cam[0].detach().cpu().numpy()
-    class_names = ["Tumor Core", "Whole Tumor", "Enhancing Tumor"]
-    os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, f"saliency_{saliency_method}_sample{sample_idx}_class{target_class}_channel{channel_idx}.png")
-    show_cam_overlay(input_np, cam_np, f"Saliency ({saliency_method}): {class_names[target_class]}", channel_idx=channel_idx, save_path=save_path)
-    return input_np, cam_np
-
 def main():
-    parser = argparse.ArgumentParser(description="SwinUNETR V2 GradCAM/Saliency Visualization")
+    parser = argparse.ArgumentParser(description="SwinUNETR V2 GradCAM Visualization")
     parser.add_argument("--dataset_path", type=str, help="Path to dataset.json (will be created if --prepare_json is set)")
     parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to model checkpoint (.pth)")
     parser.add_argument("--targetclass", type=int, default=1, help="Target class index (0=TC, 1=WT, 2=ET)")
@@ -189,7 +132,6 @@ def main():
     parser.add_argument("--output_dir", type=str, default="/kaggle/working/visualizations", help="Output directory for dataset.json (for --prepare_json) and GradCAM outputs")
     parser.add_argument("--dataset_type", type=str, default="brats2023", choices=["brats2021", "brats2023"], help="Dataset type (for --prepare_json)")
     parser.add_argument("--channel_idx", type=int, default=3, help="Image channel index to visualize (0=T1c, 1=T1n, 2=T2f, 3=T2w)")
-    parser.add_argument("--saliency_method", type=str, default=None, choices=[None, "gradcam", "vanillagrad", "guidedbackpropgrad", "smoothgrad", "guidedbackpropsmoothgrad"], help="Saliency method to use (default: gradcam)")
     args = parser.parse_args()
 
     dataset_json_path = args.dataset_path
@@ -203,26 +145,15 @@ def main():
     if not dataset_json_path:
         raise ValueError("--dataset_path must be specified (or use --prepare_json to create it).")
 
-    if args.saliency_method is None or args.saliency_method == "gradcam":
-        run_gradcam(
-            dataset_path=dataset_json_path,
-            checkpoint_path=args.checkpoint_path,
-            sample_idx=args.sample_idx,
-            target_class=args.targetclass,
-            target_layer=args.target_layer,
-            output_dir=args.output_dir,
-            channel_idx=args.channel_idx
-        )
-    else:
-        run_saliency(
-            dataset_path=dataset_json_path,
-            checkpoint_path=args.checkpoint_path,
-            sample_idx=args.sample_idx,
-            target_class=args.targetclass,
-            output_dir=args.output_dir,
-            channel_idx=args.channel_idx,
-            saliency_method=args.saliency_method
-        )
+    run_gradcam(
+        dataset_path=dataset_json_path,
+        checkpoint_path=args.checkpoint_path,
+        sample_idx=args.sample_idx,
+        target_class=args.targetclass,
+        target_layer=args.target_layer,
+        output_dir=args.output_dir,
+        channel_idx=args.channel_idx
+    )
 
 if __name__ == "__main__":
     main()
