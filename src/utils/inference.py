@@ -114,7 +114,7 @@ class InferenceEngine:
         test_ds = Dataset(data=test_files, transform=val_transforms)
         test_loader = DataLoader(
             test_ds, 
-            batch_size=1, 
+            batch_size=self.args.batch_size, 
             shuffle=False, 
             num_workers=self.args.num_workers
         )
@@ -468,6 +468,7 @@ def parse_args():
                        help="Overlap for sliding window inference")
     parser.add_argument("--threshold", type=float, default=0.5,
                        help="Threshold for converting probabilities to binary")
+    parser.add_argument("--batch_size", type=int, default=1)
     
     # Model architecture arguments
     parser.add_argument("--feature_size", type=int, default=48,
@@ -484,7 +485,7 @@ def parse_args():
                        help="Use modality attention module")
     
     # Training-related arguments (for model initialization)
-    parser.add_argument("--max_epochs", type=int, default=100,
+    parser.add_argument("--max_epochs", type=int, default=50,
                        help="Maximum epochs (for model init)")
     parser.add_argument("--learning_rate", type=float, default=1e-4,
                        help="Learning rate (for model init)")
