@@ -4,7 +4,10 @@ This script loads a trained checkpoint and runs inference on a test dataset,
 generating all metrics and predictions similar to the validation pipeline.
 """
 
+import sys
 import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+
 import argparse
 import json
 import torch
