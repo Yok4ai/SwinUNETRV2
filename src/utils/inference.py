@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Standalone inference pipeline for SwinUNETR V2 model.
 This script loads a trained checkpoint and runs inference on a test dataset,
@@ -337,7 +336,7 @@ class InferenceEngine:
         for metric, value in metrics.items():
             std_key = metric.replace('Mean', 'Std')
             std_value = std_metrics.get(std_key, 0.0)
-            print(f"{metric:20s}: {value:.4f} ± {std_value:.4f}")
+            print(f"{metric:20s}: {value:.4f} Â± {std_value:.4f}")
         
         print("\nDETAILED DICE SCORES:")
         print("-" * 40)
@@ -365,7 +364,7 @@ class InferenceEngine:
             for metric, value in metrics.items():
                 std_key = metric.replace('Mean', 'Std')
                 std_value = std_metrics.get(std_key, 0.0)
-                f.write(f"{metric:20s}: {value:.4f} ± {std_value:.4f}\n")
+                f.write(f"{metric:20s}: {value:.4f} Â± {std_value:.4f}\n")
             
             f.write(f"\nDETAILED DICE SCORES:\n")
             f.write("-" * 40 + "\n")
