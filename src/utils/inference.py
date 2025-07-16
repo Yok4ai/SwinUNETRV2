@@ -130,7 +130,6 @@ class InferenceEngine:
         
         # Initialize standard MONAI SwinUNETR model
         model = SwinUNETR(
-            img_size=self.args.roi_size,
             in_channels=4,
             out_channels=3,
             feature_size=self.args.feature_size,
@@ -139,7 +138,6 @@ class InferenceEngine:
             drop_rate=0.0,
             attn_drop_rate=0.0,
             dropout_path_rate=0.0,
-            normalize=True,
             use_checkpoint=True,
             spatial_dims=3,
             downsample=self.args.downsample,
