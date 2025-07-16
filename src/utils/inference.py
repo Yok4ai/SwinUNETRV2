@@ -27,7 +27,7 @@ from sklearn.model_selection import train_test_split
 # Import project modules
 from src.data.augmentations import get_transforms
 from src.data.convert_labels import ConvertLabels
-from src.models.pipeline import BrainTumorSegmentation
+from monai.networks.nets import SwinUNETR
 from kaggle_setup import prepare_brats_data
 
 # Suppress warnings
@@ -121,46 +121,47 @@ class InferenceEngine:
         
         return test_loader
     
-    def load_model(self) -> BrainTumorSegmentation:
+    def load_model(self) -> SwinUNETR:
         """Load the trained model from checkpoint."""
         print(f"Loading model from: {self.args.checkpoint_path}")
         
         if not os.path.exists(self.args.checkpoint_path):
             raise FileNotFoundError(f"Checkpoint not found: {self.args.checkpoint_path}")
         
-        # Create dummy dataloaders for model initialization
-        dummy_loader = None
-        
-        # Initialize model with similar parameters as training
-        model = BrainTumorSegmentation(
-            train_loader=dummy_loader,
-            val_loader=dummy_loader,
-            max_epochs=self.args.max_epochs,
-            learning_rate=self.args.learning_rate,
+        # Initialize standard MONAI SwinUNETR model
+        model = SwinUNETR(
+            img_size=self.args.roi_size,
+            in_channels=4,
+            out_channels=3,
             feature_size=self.args.feature_size,
-            roi_size=self.args.roi_size,
-            sw_batch_size=self.args.sw_batch_size,
-            use_v2=self.args.use_v2,
             depths=self.args.depths,
             num_heads=self.args.num_heads,
+            drop_rate=0.0,
+            attn_drop_rate=0.0,
+            dropout_path_rate=0.0,
+            normalize=True,
+            use_checkpoint=True,
+            spatial_dims=3,
             downsample=self.args.downsample,
-            use_class_weights=self.args.use_class_weights,
-            loss_type=self.args.loss_type,
-            use_modality_attention=self.args.use_modality_attention,
-            overlap=self.args.overlap,
-            threshold=self.args.threshold,
-            class_weights=self.args.class_weights
+            use_v2=self.args.use_v2
         )
         
         # Load state dict
         if self.args.checkpoint_path.endswith('.ckpt'):
-            # Lightning checkpoint
+            # Lightning checkpoint - extract only the SwinUNETR model weights
             checkpoint = torch.load(self.args.checkpoint_path, map_location=self.device)
-            model.load_state_dict(checkpoint['state_dict'])
+            # Filter to only include SwinUNETR model weights (remove Lightning wrapper)
+            model_state_dict = {}
+            for key, value in checkpoint['state_dict'].items():
+                if key.startswith('model.'):
+                    # Remove the 'model.' prefix to match direct SwinUNETR
+                    new_key = key[6:]
+                    model_state_dict[new_key] = value
+            model.load_state_dict(model_state_dict, strict=False)
         else:
             # PyTorch state dict
             state_dict = torch.load(self.args.checkpoint_path, map_location=self.device)
-            model.model.load_state_dict(state_dict)
+            model.load_state_dict(state_dict, strict=False)
         
         model.to(self.device)
         model.eval()
@@ -195,7 +196,7 @@ class InferenceEngine:
             'f1': f1.mean().item()
         }
     
-    def run_inference(self, model: BrainTumorSegmentation, test_loader: DataLoader):
+    def run_inference(self, model: SwinUNETR, test_loader: DataLoader):
         """Run inference on the test dataset."""
         print("Starting inference...")
         
@@ -216,7 +217,7 @@ class InferenceEngine:
                     inputs, 
                     roi_size=self.args.roi_size, 
                     sw_batch_size=self.args.sw_batch_size,
-                    predictor=model.model, 
+                    predictor=model, 
                     overlap=self.args.overlap
                 )
                 
