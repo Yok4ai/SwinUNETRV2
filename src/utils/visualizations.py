@@ -17,6 +17,7 @@ from kaggle_setup import prepare_brats_data
 from captum.attr import Saliency
 from captum.attr import IntegratedGradients
 from captum.attr import LRP
+from captum.attr._utils.lrp_rules import EpsilonRule, GammaRule, Alpha1Beta0Rule
 
 set_determinism(42)
 
@@ -226,6 +227,41 @@ def run_integrated_gradients(
     plt.close()
     return input_np, attributions
 
+def configure_lrp_rules(model):
+    """Configure LRP rules for different layer types in the model."""
+    import torch.nn as nn
+    
+    # Define rules for different layer types
+    epsilon_rule = EpsilonRule(epsilon=1e-7)
+    gamma_rule = GammaRule(gamma=0.25)
+    alpha_beta_rule = Alpha1Beta0Rule()
+    
+    # Apply rules to different layer types
+    for name, module in model.named_modules():
+        if isinstance(module, (nn.Conv3d, nn.Conv2d, nn.Conv1d)):
+            # Use epsilon rule for convolutional layers
+            module.rule = epsilon_rule
+        elif isinstance(module, (nn.Linear,)):
+            # Use alpha-beta rule for linear layers
+            module.rule = alpha_beta_rule
+        elif isinstance(module, (nn.BatchNorm3d, nn.BatchNorm2d, nn.BatchNorm1d, nn.LayerNorm)):
+            # Use epsilon rule for normalization layers
+            module.rule = epsilon_rule
+        elif isinstance(module, (nn.ReLU, nn.GELU, nn.SiLU, nn.Swish)):
+            # Use gamma rule for activation layers
+            module.rule = gamma_rule
+        elif isinstance(module, (nn.MaxPool3d, nn.MaxPool2d, nn.AvgPool3d, nn.AvgPool2d)):
+            # Use epsilon rule for pooling layers
+            module.rule = epsilon_rule
+        elif isinstance(module, (nn.AdaptiveAvgPool3d, nn.AdaptiveAvgPool2d)):
+            # Use epsilon rule for adaptive pooling layers
+            module.rule = epsilon_rule
+        elif isinstance(module, (nn.Dropout, nn.Dropout2d, nn.Dropout3d)):
+            # Use epsilon rule for dropout layers
+            module.rule = epsilon_rule
+    
+    return model
+
 def run_lrp(
     dataset_path,
     checkpoint_path,
@@ -242,6 +278,10 @@ def run_lrp(
     model = build_model(img_size=96, in_channels=4, out_channels=3, feature_size=48, use_v2=True)
     model, device = load_weights(model, checkpoint_path)
     model.eval()
+    
+    # Configure LRP rules for different layer types
+    model = configure_lrp_rules(model)
+    
     sample = dataset[sample_idx]
     image = sample["image"].unsqueeze(0).to(device)
     image.requires_grad = True
