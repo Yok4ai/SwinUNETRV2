@@ -236,7 +236,7 @@ def configure_lrp_rules(model):
     gamma_rule = GammaRule(gamma=0.25)
     
     # Apply rules to different layer types
-    for name, module in model.named_modules():
+    for _, module in model.named_modules():
         if isinstance(module, (nn.Conv3d, nn.Conv2d, nn.Conv1d)):
             # Use epsilon rule for convolutional layers
             module.rule = epsilon_rule
@@ -246,7 +246,7 @@ def configure_lrp_rules(model):
         elif isinstance(module, (nn.BatchNorm3d, nn.BatchNorm2d, nn.BatchNorm1d, nn.LayerNorm)):
             # Use epsilon rule for normalization layers
             module.rule = epsilon_rule
-        elif isinstance(module, (nn.ReLU, nn.GELU, nn.SiLU, nn.Swish)):
+        elif isinstance(module, (nn.ReLU, nn.GELU, nn.SiLU)):
             # Use gamma rule for activation layers
             module.rule = gamma_rule
         elif isinstance(module, (nn.MaxPool3d, nn.MaxPool2d, nn.AvgPool3d, nn.AvgPool2d)):
@@ -271,7 +271,7 @@ def run_lrp(
     cmap="jet"
 ):
     datalist = load_datalist(dataset_path)
-    train_tfms, val_tfms = get_transforms(img_size=96)
+    _, val_tfms = get_transforms(img_size=96)
     from monai.data import Dataset
     dataset = Dataset(data=datalist, transform=val_tfms)
     model = build_model(img_size=96, in_channels=4, out_channels=3, feature_size=48, use_v2=True)
