@@ -231,46 +231,43 @@ def configure_lrp_rules(model):
     """Configure LRP rules for different layer types in the model."""
     import torch.nn as nn
     
-    # Define rules for different layer types
-    epsilon_rule = EpsilonRule(epsilon=1e-7)
-    gamma_rule = GammaRule(gamma=0.25)
-    
     # Apply rules to different layer types
     for _, module in model.named_modules():
         # Skip if module already has a rule
         if hasattr(module, 'rule'):
             continue
             
+        # Create unique rule instances for each module to avoid sharing issues
         # Standard PyTorch layers
         if isinstance(module, (nn.Conv3d, nn.Conv2d, nn.Conv1d)):
-            module.rule = epsilon_rule
+            module.rule = EpsilonRule(epsilon=1e-7)
         elif isinstance(module, (nn.Linear,)):
-            module.rule = epsilon_rule
+            module.rule = EpsilonRule(epsilon=1e-7)
         elif isinstance(module, (nn.BatchNorm3d, nn.BatchNorm2d, nn.BatchNorm1d, nn.LayerNorm, nn.GroupNorm, nn.InstanceNorm3d, nn.InstanceNorm2d, nn.InstanceNorm1d)):
-            module.rule = epsilon_rule
+            module.rule = EpsilonRule(epsilon=1e-7)
         elif isinstance(module, (nn.ReLU, nn.GELU, nn.SiLU, nn.LeakyReLU, nn.ELU, nn.PReLU)):
-            module.rule = gamma_rule
+            module.rule = GammaRule(gamma=0.25)
         elif isinstance(module, (nn.Softmax, nn.LogSoftmax)):
-            module.rule = epsilon_rule
+            module.rule = EpsilonRule(epsilon=1e-7)
         elif isinstance(module, (nn.Identity,)):
-            module.rule = epsilon_rule
+            module.rule = EpsilonRule(epsilon=1e-7)
         elif isinstance(module, (nn.MaxPool3d, nn.MaxPool2d, nn.AvgPool3d, nn.AvgPool2d)):
-            module.rule = epsilon_rule
+            module.rule = EpsilonRule(epsilon=1e-7)
         elif isinstance(module, (nn.AdaptiveAvgPool3d, nn.AdaptiveAvgPool2d)):
-            module.rule = epsilon_rule
+            module.rule = EpsilonRule(epsilon=1e-7)
         elif isinstance(module, (nn.Dropout, nn.Dropout2d, nn.Dropout3d)):
-            module.rule = epsilon_rule
+            module.rule = EpsilonRule(epsilon=1e-7)
         elif isinstance(module, (nn.ConvTranspose3d, nn.ConvTranspose2d, nn.ConvTranspose1d)):
-            module.rule = epsilon_rule
+            module.rule = EpsilonRule(epsilon=1e-7)
         elif isinstance(module, (nn.Upsample, nn.UpsamplingNearest2d, nn.UpsamplingBilinear2d)):
-            module.rule = epsilon_rule
+            module.rule = EpsilonRule(epsilon=1e-7)
         elif isinstance(module, (nn.Flatten, nn.Unflatten)):
-            module.rule = epsilon_rule
+            module.rule = EpsilonRule(epsilon=1e-7)
         # Handle any other layer types with epsilon rule as fallback
         else:
             # Only apply rule to leaf modules (modules without children)
             if len(list(module.children())) == 0:
-                module.rule = epsilon_rule
+                module.rule = EpsilonRule(epsilon=1e-7)
     
     return model
 
