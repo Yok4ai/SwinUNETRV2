@@ -237,30 +237,40 @@ def configure_lrp_rules(model):
     
     # Apply rules to different layer types
     for _, module in model.named_modules():
+        # Skip if module already has a rule
+        if hasattr(module, 'rule'):
+            continue
+            
+        # Standard PyTorch layers
         if isinstance(module, (nn.Conv3d, nn.Conv2d, nn.Conv1d)):
-            # Use epsilon rule for convolutional layers
             module.rule = epsilon_rule
         elif isinstance(module, (nn.Linear,)):
-            # Use epsilon rule for linear layers (fallback since Alpha1Beta0Rule not available)
             module.rule = epsilon_rule
-        elif isinstance(module, (nn.BatchNorm3d, nn.BatchNorm2d, nn.BatchNorm1d, nn.LayerNorm)):
-            # Use epsilon rule for normalization layers
+        elif isinstance(module, (nn.BatchNorm3d, nn.BatchNorm2d, nn.BatchNorm1d, nn.LayerNorm, nn.GroupNorm, nn.InstanceNorm3d, nn.InstanceNorm2d, nn.InstanceNorm1d)):
             module.rule = epsilon_rule
-        elif isinstance(module, (nn.ReLU, nn.GELU, nn.SiLU)):
-            # Use gamma rule for activation layers
+        elif isinstance(module, (nn.ReLU, nn.GELU, nn.SiLU, nn.LeakyReLU, nn.ELU, nn.PReLU)):
             module.rule = gamma_rule
-        elif isinstance(module, (nn.Softmax,)):
-            # Use epsilon rule for softmax layers
+        elif isinstance(module, (nn.Softmax, nn.LogSoftmax)):
+            module.rule = epsilon_rule
+        elif isinstance(module, (nn.Identity,)):
             module.rule = epsilon_rule
         elif isinstance(module, (nn.MaxPool3d, nn.MaxPool2d, nn.AvgPool3d, nn.AvgPool2d)):
-            # Use epsilon rule for pooling layers
             module.rule = epsilon_rule
         elif isinstance(module, (nn.AdaptiveAvgPool3d, nn.AdaptiveAvgPool2d)):
-            # Use epsilon rule for adaptive pooling layers
             module.rule = epsilon_rule
         elif isinstance(module, (nn.Dropout, nn.Dropout2d, nn.Dropout3d)):
-            # Use epsilon rule for dropout layers
             module.rule = epsilon_rule
+        elif isinstance(module, (nn.ConvTranspose3d, nn.ConvTranspose2d, nn.ConvTranspose1d)):
+            module.rule = epsilon_rule
+        elif isinstance(module, (nn.Upsample, nn.UpsamplingNearest2d, nn.UpsamplingBilinear2d)):
+            module.rule = epsilon_rule
+        elif isinstance(module, (nn.Flatten, nn.Unflatten)):
+            module.rule = epsilon_rule
+        # Handle any other layer types with epsilon rule as fallback
+        else:
+            # Only apply rule to leaf modules (modules without children)
+            if len(list(module.children())) == 0:
+                module.rule = epsilon_rule
     
     return model
 
