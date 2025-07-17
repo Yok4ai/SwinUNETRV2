@@ -101,10 +101,10 @@ class InferenceEngine:
         
         # Use validation split or full dataset based on user choice
         if self.args.use_val_split:
-            # Use same split as training (80/20)
-            train_files, val_files = train_test_split(datalist, test_size=0.2, random_state=42)
+            # Use same split as training (default 80/20, now configurable)
+            train_files, val_files = train_test_split(datalist, test_size=self.args.val_split_size, random_state=42)
             test_files = val_files
-            print(f"Using validation split: {len(test_files)} cases")
+            print(f"Using validation split: {len(test_files)} cases (test_size={self.args.val_split_size})")
         else:
             # Use full dataset
             test_files = datalist
@@ -456,6 +456,8 @@ def parse_args():
                        help="Prepare BraTS data and create dataset.json")
     parser.add_argument("--use_val_split", action="store_true",
                        help="Use validation split (80/20) instead of full dataset")
+    parser.add_argument("--val_split_size", type=float, default=0.2,
+                       help="Validation split size (fraction, e.g., 0.2 for 20%)")
     
     # Model arguments
     parser.add_argument("--img_size", type=int, default=96,
