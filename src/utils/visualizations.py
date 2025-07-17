@@ -249,6 +249,9 @@ def configure_lrp_rules(model):
         elif isinstance(module, (nn.ReLU, nn.GELU, nn.SiLU)):
             # Use gamma rule for activation layers
             module.rule = gamma_rule
+        elif isinstance(module, (nn.Softmax,)):
+            # Use epsilon rule for softmax layers
+            module.rule = epsilon_rule
         elif isinstance(module, (nn.MaxPool3d, nn.MaxPool2d, nn.AvgPool3d, nn.AvgPool2d)):
             # Use epsilon rule for pooling layers
             module.rule = epsilon_rule
