@@ -17,7 +17,7 @@ from kaggle_setup import prepare_brats_data
 from captum.attr import Saliency
 from captum.attr import IntegratedGradients
 from captum.attr import LRP
-from captum.attr._utils.lrp_rules import EpsilonRule, GammaRule, Alpha1Beta0Rule
+from captum.attr._utils.lrp_rules import EpsilonRule, GammaRule
 
 set_determinism(42)
 
@@ -234,7 +234,6 @@ def configure_lrp_rules(model):
     # Define rules for different layer types
     epsilon_rule = EpsilonRule(epsilon=1e-7)
     gamma_rule = GammaRule(gamma=0.25)
-    alpha_beta_rule = Alpha1Beta0Rule()
     
     # Apply rules to different layer types
     for name, module in model.named_modules():
@@ -242,8 +241,8 @@ def configure_lrp_rules(model):
             # Use epsilon rule for convolutional layers
             module.rule = epsilon_rule
         elif isinstance(module, (nn.Linear,)):
-            # Use alpha-beta rule for linear layers
-            module.rule = alpha_beta_rule
+            # Use epsilon rule for linear layers (fallback since Alpha1Beta0Rule not available)
+            module.rule = epsilon_rule
         elif isinstance(module, (nn.BatchNorm3d, nn.BatchNorm2d, nn.BatchNorm1d, nn.LayerNorm)):
             # Use epsilon rule for normalization layers
             module.rule = epsilon_rule
