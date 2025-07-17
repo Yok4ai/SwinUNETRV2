@@ -16,6 +16,7 @@ from data.dataloader import get_dataloaders
 from kaggle_setup import prepare_brats_data
 from captum.attr import Saliency
 from captum.attr import IntegratedGradients
+from captum.attr import LRP
 
 set_determinism(42)
 
@@ -225,6 +226,54 @@ def run_integrated_gradients(
     plt.close()
     return input_np, attributions
 
+def run_lrp(
+    dataset_path,
+    checkpoint_path,
+    sample_idx=0,
+    target_class=1,
+    output_dir=".",
+    channel_idx=3,
+    cmap="jet"
+):
+    datalist = load_datalist(dataset_path)
+    train_tfms, val_tfms = get_transforms(img_size=96)
+    from monai.data import Dataset
+    dataset = Dataset(data=datalist, transform=val_tfms)
+    model = build_model(img_size=96, in_channels=4, out_channels=3, feature_size=48, use_v2=True)
+    model, device = load_weights(model, checkpoint_path)
+    model.eval()
+    sample = dataset[sample_idx]
+    image = sample["image"].unsqueeze(0).to(device)
+    image.requires_grad = True
+    # Force resize to [96, 96, 96] if needed
+    if image.shape[2:] != (96, 96, 96):
+        image = F.interpolate(image, size=(96, 96, 96), mode="trilinear", align_corners=False)
+    
+    lrp = LRP(model)
+    attributions = lrp.attribute(image, target=target_class)
+    attributions = attributions.detach().cpu().numpy()[0]
+    input_np = image[0].detach().cpu().numpy()
+    mid = input_np.shape[2] // 2
+    
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.imshow(input_np[channel_idx, :, mid, :], cmap="gray")
+    plt.title("Original")
+    plt.axis("off")
+    plt.subplot(1, 2, 2)
+    plt.imshow(input_np[channel_idx, :, mid, :], cmap="gray")
+    attr_norm = normalize_attr(attributions[channel_idx, :, mid, :])
+    plt.imshow(attr_norm, cmap=cmap, alpha=0.8)
+    plt.title("LRP Overlay")
+    plt.axis("off")
+    plt.tight_layout()
+    os.makedirs(output_dir, exist_ok=True)
+    save_path = os.path.join(output_dir, f"lrp_sample{sample_idx}_class{target_class}_channel{channel_idx}.png")
+    plt.savefig(save_path)
+    print(f"[INFO] Saved LRP overlay to {save_path}")
+    plt.close()
+    return input_np, attributions
+
 def main():
     parser = argparse.ArgumentParser(description="SwinUNETR V2 Visualization (GradCAM/Saliency)")
     parser.add_argument("--dataset_path", type=str, help="Path to dataset.json (will be created if --prepare_json is set)")
@@ -237,7 +286,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default="/kaggle/working/visualizations", help="Output directory for dataset.json (for --prepare_json) and outputs")
     parser.add_argument("--dataset_type", type=str, default="brats2023", choices=["brats2021", "brats2023"], help="Dataset type (for --prepare_json)")
     parser.add_argument("--channel_idx", type=int, default=3, help="Image channel index to visualize (0=T1c, 1=T1n, 2=T2f, 3=T2w)")
-    parser.add_argument("--method", type=str, default="gradcam", choices=["gradcam", "saliency", "integrated_gradients"], help="Visualization method: gradcam, saliency, or integrated_gradients")
+    parser.add_argument("--method", type=str, default="gradcam", choices=["gradcam", "saliency", "integrated_gradients", "lrp"], help="Visualization method: gradcam, saliency, integrated_gradients, or lrp")
     parser.add_argument("--cmap", type=str, default="magma", help="Colormap for attribution overlay (e.g., magma, jet, hot, viridis)")
     args = parser.parse_args()
 
@@ -273,6 +322,16 @@ def main():
         )
     elif args.method == "integrated_gradients":
         run_integrated_gradients(
+            dataset_path=dataset_json_path,
+            checkpoint_path=args.checkpoint_path,
+            sample_idx=args.sample_idx,
+            target_class=args.targetclass,
+            output_dir=args.output_dir,
+            channel_idx=args.channel_idx,
+            cmap=args.cmap
+        )
+    elif args.method == "lrp":
+        run_lrp(
             dataset_path=dataset_json_path,
             checkpoint_path=args.checkpoint_path,
             sample_idx=args.sample_idx,
