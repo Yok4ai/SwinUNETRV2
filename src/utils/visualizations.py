@@ -16,8 +16,6 @@ from data.dataloader import get_dataloaders
 from kaggle_setup import prepare_brats_data
 from captum.attr import Saliency
 from captum.attr import IntegratedGradients
-from captum.attr import LRP
-from captum.attr._utils.lrp_rules import EpsilonRule, GammaRule
 
 set_determinism(42)
 
@@ -227,101 +225,6 @@ def run_integrated_gradients(
     plt.close()
     return input_np, attributions
 
-def configure_lrp_rules(model):
-    """Configure LRP rules for different layer types in the model."""
-    import torch.nn as nn
-    
-    # Apply rules to different layer types
-    for _, module in model.named_modules():
-        # Skip if module already has a rule
-        if hasattr(module, 'rule'):
-            continue
-            
-        # Create unique rule instances for each module to avoid sharing issues
-        # Standard PyTorch layers
-        if isinstance(module, (nn.Conv3d, nn.Conv2d, nn.Conv1d)):
-            module.rule = EpsilonRule(epsilon=1e-7)
-        elif isinstance(module, (nn.Linear,)):
-            module.rule = EpsilonRule(epsilon=1e-7)
-        elif isinstance(module, (nn.BatchNorm3d, nn.BatchNorm2d, nn.BatchNorm1d, nn.LayerNorm, nn.GroupNorm, nn.InstanceNorm3d, nn.InstanceNorm2d, nn.InstanceNorm1d)):
-            module.rule = EpsilonRule(epsilon=1e-7)
-        elif isinstance(module, (nn.ReLU, nn.GELU, nn.SiLU, nn.LeakyReLU, nn.ELU, nn.PReLU)):
-            module.rule = GammaRule(gamma=0.25)
-        elif isinstance(module, (nn.Softmax, nn.LogSoftmax)):
-            module.rule = EpsilonRule(epsilon=1e-7)
-        elif isinstance(module, (nn.Identity,)):
-            module.rule = EpsilonRule(epsilon=1e-7)
-        elif isinstance(module, (nn.MaxPool3d, nn.MaxPool2d, nn.AvgPool3d, nn.AvgPool2d)):
-            module.rule = EpsilonRule(epsilon=1e-7)
-        elif isinstance(module, (nn.AdaptiveAvgPool3d, nn.AdaptiveAvgPool2d)):
-            module.rule = EpsilonRule(epsilon=1e-7)
-        elif isinstance(module, (nn.Dropout, nn.Dropout2d, nn.Dropout3d)):
-            module.rule = EpsilonRule(epsilon=1e-7)
-        elif isinstance(module, (nn.ConvTranspose3d, nn.ConvTranspose2d, nn.ConvTranspose1d)):
-            module.rule = EpsilonRule(epsilon=1e-7)
-        elif isinstance(module, (nn.Upsample, nn.UpsamplingNearest2d, nn.UpsamplingBilinear2d)):
-            module.rule = EpsilonRule(epsilon=1e-7)
-        elif isinstance(module, (nn.Flatten, nn.Unflatten)):
-            module.rule = EpsilonRule(epsilon=1e-7)
-        # Handle any other layer types with epsilon rule as fallback
-        else:
-            # Only apply rule to leaf modules (modules without children)
-            if len(list(module.children())) == 0:
-                module.rule = EpsilonRule(epsilon=1e-7)
-    
-    return model
-
-def run_lrp(
-    dataset_path,
-    checkpoint_path,
-    sample_idx=0,
-    target_class=1,
-    output_dir=".",
-    channel_idx=3,
-    cmap="jet"
-):
-    datalist = load_datalist(dataset_path)
-    _, val_tfms = get_transforms(img_size=96)
-    from monai.data import Dataset
-    dataset = Dataset(data=datalist, transform=val_tfms)
-    model = build_model(img_size=96, in_channels=4, out_channels=3, feature_size=48, use_v2=True)
-    model, device = load_weights(model, checkpoint_path)
-    model.eval()
-    
-    # Configure LRP rules for different layer types
-    model = configure_lrp_rules(model)
-    
-    sample = dataset[sample_idx]
-    image = sample["image"].unsqueeze(0).to(device)
-    image.requires_grad = True
-    # Force resize to [96, 96, 96] if needed
-    if image.shape[2:] != (96, 96, 96):
-        image = F.interpolate(image, size=(96, 96, 96), mode="trilinear", align_corners=False)
-    
-    lrp = LRP(model)
-    attributions = lrp.attribute(image, target=target_class)
-    attributions = attributions.detach().cpu().numpy()[0]
-    input_np = image[0].detach().cpu().numpy()
-    mid = input_np.shape[2] // 2
-    
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 2, 1)
-    plt.imshow(input_np[channel_idx, :, mid, :], cmap="gray")
-    plt.title("Original")
-    plt.axis("off")
-    plt.subplot(1, 2, 2)
-    plt.imshow(input_np[channel_idx, :, mid, :], cmap="gray")
-    attr_norm = normalize_attr(attributions[channel_idx, :, mid, :])
-    plt.imshow(attr_norm, cmap=cmap, alpha=0.8)
-    plt.title("LRP Overlay")
-    plt.axis("off")
-    plt.tight_layout()
-    os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, f"lrp_sample{sample_idx}_class{target_class}_channel{channel_idx}.png")
-    plt.savefig(save_path)
-    print(f"[INFO] Saved LRP overlay to {save_path}")
-    plt.close()
-    return input_np, attributions
 
 def main():
     parser = argparse.ArgumentParser(description="SwinUNETR V2 Visualization (GradCAM/Saliency)")
@@ -335,7 +238,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default="/kaggle/working/visualizations", help="Output directory for dataset.json (for --prepare_json) and outputs")
     parser.add_argument("--dataset_type", type=str, default="brats2023", choices=["brats2021", "brats2023"], help="Dataset type (for --prepare_json)")
     parser.add_argument("--channel_idx", type=int, default=3, help="Image channel index to visualize (0=T1c, 1=T1n, 2=T2f, 3=T2w)")
-    parser.add_argument("--method", type=str, default="gradcam", choices=["gradcam", "saliency", "integrated_gradients", "lrp"], help="Visualization method: gradcam, saliency, integrated_gradients, or lrp")
+    parser.add_argument("--method", type=str, default="gradcam", choices=["gradcam", "saliency", "integrated_gradients"], help="Visualization method: gradcam, saliency, or integrated_gradients")
     parser.add_argument("--cmap", type=str, default="magma", help="Colormap for attribution overlay (e.g., magma, jet, hot, viridis)")
     args = parser.parse_args()
 
@@ -371,16 +274,6 @@ def main():
         )
     elif args.method == "integrated_gradients":
         run_integrated_gradients(
-            dataset_path=dataset_json_path,
-            checkpoint_path=args.checkpoint_path,
-            sample_idx=args.sample_idx,
-            target_class=args.targetclass,
-            output_dir=args.output_dir,
-            channel_idx=args.channel_idx,
-            cmap=args.cmap
-        )
-    elif args.method == "lrp":
-        run_lrp(
             dataset_path=dataset_json_path,
             checkpoint_path=args.checkpoint_path,
             sample_idx=args.sample_idx,
