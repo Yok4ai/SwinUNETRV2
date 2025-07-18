@@ -109,9 +109,32 @@ class InferenceEngine:
             # Use full dataset
             test_files = datalist
             print(f"Using full dataset: {len(test_files)} cases")
-        
+
+        # Filter out samples with missing or empty NIfTI files
+        def is_valid_nifti(path):
+            return os.path.exists(path) and os.path.getsize(path) > 0
+
+        filtered_test_files = []
+        for item in test_files:
+            all_valid = True
+            for key in ['image', 'label']:
+                if key in item:
+                    if isinstance(item[key], list):
+                        for f in item[key]:
+                            if not is_valid_nifti(f):
+                                all_valid = False
+                    else:
+                        if not is_valid_nifti(item[key]):
+                            all_valid = False
+            if all_valid:
+                filtered_test_files.append(item)
+            else:
+                print(f"[WARNING] Skipping sample due to missing/empty file: {item}")
+
+        print(f"Filtered dataset: {len(filtered_test_files)} valid cases (removed {len(test_files) - len(filtered_test_files)})")
+
         # Create dataset and dataloader
-        test_ds = Dataset(data=test_files, transform=val_transforms)
+        test_ds = Dataset(data=filtered_test_files, transform=val_transforms)
         test_loader = DataLoader(
             test_ds, 
             batch_size=self.args.batch_size, 
