@@ -13,6 +13,11 @@
 |------------|---------|-----------|---------------|--------------|--------------|--------------|---------------|--------------|--------------------|--------------------|----------------|----------------|---------------|
 | 2023-hybrid-class-weights | BraTS 2023 | hybrid-dicece-focal | 0.9338 | 0.9423 | 0.9368 | 0.9223 | 0.8788 | 0.9380 | 0.9205 | 0.9592 | 23.3095 | 49 | batch_size=2, lr=1e-3, img_size=96, feature_size=48, roi_size=96x96x96, warmup_epochs=15, epochs=50, use_class_weights=True, modality_attention=True, loss_type=hybrid-dicece-focal |
 
+## Generalization Test: Trained on BraTS 2023, Tested on BraTS 2021 (Unseen Data)
+
+| Checkpoint | Train Dataset | Test Dataset | Mean Dice | Dice TC | Dice WT | Dice ET | Mean IoU | Mean F1 | Mean Precision | Mean Recall | Mean Hausdorff | # Cases | ROI size | Overlap | Threshold |
+|------------|---------------|-------------|-----------|---------|---------|---------|----------|---------|----------------|-------------|---------------|---------|----------|---------|-----------|
+| /kaggle/input/swinv2-46epochs-2023/pytorch/default/1/46_epochs_swinunetr_v2_brats23.pth | BraTS 2023 | BraTS 2021 | 0.8741 ± 0.0987 | 0.8542 ± 0.1578 | 0.9087 ± 0.0572 | 0.8663 ± 0.1162 | 0.8071 ± 0.1163 | 0.8945 ± 0.0691 | 0.9246 ± 0.0542 | 0.8834 ± 0.1006 | 25.1909 ± 18.2548 | 126 | [96, 96, 96] | 0.7 | 0.5 |
 
 
 ## Summary Statistics
