@@ -135,7 +135,9 @@ class MultiScaleWindowAttention(nn.Module):
             if mask is not None and mask.shape[-1] == n:
                 attn_mask = mask
             if attn_mask is not None:
-                attn = attn + attn_mask.unsqueeze(0).unsqueeze(0)
+                nw = attn_mask.shape[0]
+                attn = attn.view(b // nw, nw, self.num_heads, n, n) + attn_mask.unsqueeze(1).unsqueeze(0)
+                attn = attn.view(-1, self.num_heads, n, n)
             attn = self.softmax(attn)
             attn = attn_drop(attn)
             # Apply attention to values
