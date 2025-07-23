@@ -125,6 +125,12 @@ class MultiScaleWindowAttention(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         
     def forward(self, x, mask=None):
+        # Defensive reshape: flatten to (B, N, C) if needed
+        if x.dim() > 3:
+            b = x.shape[0]
+            c = x.shape[1]
+            n = x.numel() // (b * c)
+            x = x.view(b, c, n).transpose(1, 2)  # (B, N, C)
         b, n, c = x.shape
         
         # Multi-scale attention computation
