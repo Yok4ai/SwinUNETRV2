@@ -634,7 +634,7 @@ class SwinUNETR(nn.Module):
         downsample: str | nn.Module = "merging",
         use_v2: bool = True,  # Default to True for enhanced version
         # New parameters for SwinUNETRPlus
-        use_multi_scale_attention: bool = False,
+        use_multi_scale_attention: bool = True,
         use_adaptive_window: bool = False,
         use_cross_layer_fusion: bool = False,
         use_hierarchical_skip: bool = False,
