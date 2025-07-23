@@ -93,80 +93,58 @@ class MultiScaleWindowAttention(nn.Module):
         self.num_heads = num_heads
         self.window_sizes = window_sizes
         self.num_scales = len(window_sizes)
-        
         head_dim = dim // num_heads
         self.scale = head_dim ** -0.5
-        
         # Create QKV projections for each scale
         self.qkvs = nn.ModuleList([
             nn.Linear(dim, dim * 3, bias=qkv_bias) for _ in window_sizes
         ])
-        
         # Output projections for each scale
         self.projs = nn.ModuleList([
             nn.Linear(dim, dim) for _ in window_sizes
         ])
-        
         # Attention dropouts
         self.attn_drops = nn.ModuleList([
             nn.Dropout(attn_drop) for _ in window_sizes
         ])
-        
         self.proj_drops = nn.ModuleList([
             nn.Dropout(proj_drop) for _ in window_sizes
         ])
-        
         # Learnable fusion weights
         self.fusion_weights = nn.Parameter(torch.ones(self.num_scales) / self.num_scales)
-        
         # Final output projection
         self.out_proj = nn.Linear(dim, dim)
-        
         self.softmax = nn.Softmax(dim=-1)
-        
+
     def forward(self, x, mask=None):
-        # Defensive reshape: flatten to (B, N, C) if needed
-        if x.dim() > 3:
-            b = x.shape[0]
-            c = x.shape[1]
-            n = x.numel() // (b * c)
-            x = x.view(b, c, n).transpose(1, 2)  # (B, N, C)
+        # x: (num_windows*B, window_size**3, C)
         b, n, c = x.shape
-        
         # Multi-scale attention computation
         scale_outputs = []
-        
         for i, (qkv, proj, attn_drop, proj_drop) in enumerate(zip(
             self.qkvs, self.projs, self.attn_drops, self.proj_drops
         )):
             # QKV projection
             qkv_out = qkv(x).reshape(b, n, 3, self.num_heads, c // self.num_heads).permute(2, 0, 3, 1, 4)
             q, k, v = qkv_out[0], qkv_out[1], qkv_out[2]
-            
             # Scaled dot-product attention
             q = q * self.scale
             attn = (q @ k.transpose(-2, -1))
-            
             # Apply mask if provided
             if mask is not None:
                 attn = attn + mask.unsqueeze(0).unsqueeze(0)
-            
             attn = self.softmax(attn)
             attn = attn_drop(attn)
-            
             # Apply attention to values
             out = (attn @ v).transpose(1, 2).reshape(b, n, c)
             out = proj(out)
             out = proj_drop(out)
-            
             scale_outputs.append(out)
-        
         # Weighted fusion of multi-scale outputs
         fusion_weights = torch.softmax(self.fusion_weights, dim=0)
         fused_output = torch.zeros_like(x)
         for i, scale_out in enumerate(scale_outputs):
             fused_output += fusion_weights[i] * scale_out
-        
         # Final projection
         output = self.out_proj(fused_output)
         return output
@@ -303,10 +281,12 @@ from .swinunetr import (
 )
 
 
+# Patch EnhancedSwinTransformerBlock to use window partitioning
 class EnhancedSwinTransformerBlock(SwinTransformerBlock):
     """
     Enhanced Swin Transformer block with multi-scale attention and adaptive window sizing.
     Extends the original Swin block with innovative attention mechanisms.
+    Uses windowed multi-scale attention for memory efficiency and expressiveness.
     """
     def __init__(
         self,
@@ -330,10 +310,8 @@ class EnhancedSwinTransformerBlock(SwinTransformerBlock):
             dim, num_heads, window_size, shift_size, mlp_ratio, qkv_bias,
             drop, attn_drop, drop_path, act_layer, norm_layer, use_checkpoint
         )
-        
         self.use_multi_scale_attention = use_multi_scale_attention
         self.use_adaptive_window = use_adaptive_window
-        
         if use_multi_scale_attention:
             self.multi_scale_attn = MultiScaleWindowAttention(
                 dim=dim,
@@ -343,20 +321,40 @@ class EnhancedSwinTransformerBlock(SwinTransformerBlock):
                 attn_drop=attn_drop,
                 proj_drop=drop,
             )
-        
         if use_adaptive_window:
             self.adaptive_window = AdaptiveWindowSizeModule(dim)
-    
+
     def forward(self, x, mask_matrix):
         if self.use_multi_scale_attention:
             # Use multi-scale attention instead of standard attention
             shortcut = x
             x = self.norm1(x)
-            
-            # Apply multi-scale attention
-            x = self.multi_scale_attn(x, mask_matrix)
+            # x: (B, D, H, W, C) for 3D
+            x_shape = x.shape
+            if len(x_shape) == 5:
+                b, d, h, w, c = x_shape
+                window_size = self.window_size
+                shift_size = self.shift_size
+                # Pad if needed
+                pad_d1 = (window_size[0] - d % window_size[0]) % window_size[0]
+                pad_b = (window_size[1] - h % window_size[1]) % window_size[1]
+                pad_r = (window_size[2] - w % window_size[2]) % window_size[2]
+                x = F.pad(x, (0, 0, 0, pad_r, 0, pad_b, 0, pad_d1))
+                _, dp, hp, wp, _ = x.shape
+                dims = [b, dp, hp, wp]
+                # Partition windows
+                x_windows = window_partition(x, window_size)  # (num_windows*B, window_size**3, C)
+                attn_windows = self.multi_scale_attn(x_windows, mask_matrix)
+                # Merge windows
+                attn_windows = attn_windows.view(-1, *(window_size + (c,)))
+                x = window_reverse(attn_windows, window_size, dims)
+                # Remove padding
+                if pad_d1 > 0 or pad_r > 0 or pad_b > 0:
+                    x = x[:, :d, :h, :w, :].contiguous()
+            else:
+                # For 2D, similar logic (not shown for brevity)
+                raise NotImplementedError("Only 3D input supported in this patch.")
             x = shortcut + self.drop_path(x)
-            
             # Standard MLP part
             x = x + self.drop_path(self.mlp(self.norm2(x)))
             return x

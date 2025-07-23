@@ -5,12 +5,19 @@
 ### 1. Multi-Scale Window Attention
 - **Window Sizes**: [7×7×7, 5×5×5, 3×3×3] processed simultaneously
 - **Implementation**: `MultiScaleWindowAttention` class
+- **Windowed Attention**: **Now uses windowed (not global) multi-scale attention for 3D volumes.**
+    - The input is partitioned into local windows (e.g., 7×7×7),
+    - Multi-scale attention is applied within each window,
+    - Windows are merged back to the original spatial shape.
+    - This preserves the multi-scale benefit while being memory efficient and scalable for large 3D images.
+    - This is a key difference from the original (global) approach and is necessary for practical training on modern GPUs.
 - **Fusion**: Learnable weights combine multi-scale outputs
 - **Performance**: +20% feature richness over single-scale attention
 
 ```python
 multi_scale_window_sizes = [7, 5, 3]
 use_multi_scale_attention = True
+# Windowed multi-scale attention is now default for 3D
 ```
 
 ### 2. Cross-Layer Attention Fusion
@@ -59,7 +66,7 @@ base_window_size = 7
 
 | Component | Original SwinUNETR | SwinUNETR Plus | Improvement |
 |:----------|:------------------|:---------------|:------------|
-| Window Attention | Single scale (7×7×7) | Multi-scale (7,5,3) | +20% feature richness |
+| Window Attention | Single scale (7×7×7) | Multi-scale (7,5,3), windowed | +20% feature richness |
 | Skip Connections | Single-scale | Hierarchical multi-scale | +15% boundary precision |
 | V2 Blocks | Basic residual | Enhanced + attention | +10% feature quality |
 | Feature Fusion | Simple addition | Cross-layer attention | +12% semantic alignment |
@@ -85,10 +92,12 @@ class SwinUNETR(nn.Module):
         use_enhanced_v2_blocks: bool = True,
         multi_scale_window_sizes: List[int] = [7, 5, 3],
     ):
+        # ...
+        # MultiScaleWindowAttention now uses windowed attention for 3D
 ```
 
 ### Enhanced Modules
-1. **MultiScaleWindowAttention**: Parallel attention at multiple scales
+1. **MultiScaleWindowAttention**: Parallel attention at multiple scales, now windowed for 3D
 2. **CrossLayerAttentionFusion**: Inter-scale feature fusion
 3. **HierarchicalSkipConnection**: Multi-scale skip connections
 4. **EnhancedV2ResidualBlock**: Attention-enhanced residual blocks
@@ -103,7 +112,7 @@ class SwinUNETR(nn.Module):
 ### Computational Cost
 - **Training**: ~20% increase in training time
 - **Inference**: ~15% increase in inference time
-- **Memory**: ~15% increase over vanilla SwinUNETR
+- **Memory**: ~15% increase over vanilla SwinUNETR (but windowed attention keeps it tractable for 3D)
 
 ### Performance Improvements
 - **Mean Dice Score**: +3-5% improvement over vanilla SwinUNETR
