@@ -11,6 +11,7 @@
     - Windows are merged back to the original spatial shape.
     - This preserves the multi-scale benefit while being memory efficient and scalable for large 3D images.
     - This is a key difference from the original (global) approach and is necessary for practical training on modern GPUs.
+- **Attention Mask Handling**: The attention mask is now only applied if its shape matches the current window size for each scale, preventing shape mismatches and ensuring robust multi-scale windowed attention. This fix is necessary for correct operation with multiple window sizes and is handled automatically in the implementation.
 - **Fusion**: Learnable weights combine multi-scale outputs
 - **Performance**: +20% feature richness over single-scale attention
 

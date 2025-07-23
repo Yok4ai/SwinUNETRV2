@@ -121,8 +121,8 @@ class MultiScaleWindowAttention(nn.Module):
         b, n, c = x.shape
         # Multi-scale attention computation
         scale_outputs = []
-        for i, (qkv, proj, attn_drop, proj_drop) in enumerate(zip(
-            self.qkvs, self.projs, self.attn_drops, self.proj_drops
+        for i, (qkv, proj, attn_drop, proj_drop, win_size) in enumerate(zip(
+            self.qkvs, self.projs, self.attn_drops, self.proj_drops, self.window_sizes
         )):
             # QKV projection
             qkv_out = qkv(x).reshape(b, n, 3, self.num_heads, c // self.num_heads).permute(2, 0, 3, 1, 4)
@@ -130,9 +130,12 @@ class MultiScaleWindowAttention(nn.Module):
             # Scaled dot-product attention
             q = q * self.scale
             attn = (q @ k.transpose(-2, -1))
-            # Apply mask if provided
-            if mask is not None:
-                attn = attn + mask.unsqueeze(0).unsqueeze(0)
+            # Only apply mask if it matches the current window size
+            attn_mask = None
+            if mask is not None and mask.shape[-1] == n:
+                attn_mask = mask
+            if attn_mask is not None:
+                attn = attn + attn_mask.unsqueeze(0).unsqueeze(0)
             attn = self.softmax(attn)
             attn = attn_drop(attn)
             # Apply attention to values
