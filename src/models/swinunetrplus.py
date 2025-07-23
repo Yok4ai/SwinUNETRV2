@@ -636,7 +636,7 @@ class SwinUNETR(nn.Module):
         # New parameters for SwinUNETRPlus
         use_multi_scale_attention: bool = False,
         use_adaptive_window: bool = False,
-        use_cross_layer_fusion: bool = True,
+        use_cross_layer_fusion: bool = False,
         use_hierarchical_skip: bool = False,
         use_enhanced_v2_blocks: bool = True,
         multi_scale_window_sizes: List[int] = [7, 5, 3],
