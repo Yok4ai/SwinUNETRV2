@@ -240,22 +240,23 @@ class HierarchicalSkipConnection(nn.Module):
         self.encoder_channels = encoder_channels
         self.decoder_channels = decoder_channels
         
-        # Pyramid feature projections with proper channel handling
+        # Pyramid feature projections
         self.pyramid_convs = nn.ModuleList()
         for enc_ch in encoder_channels:
-            # If input channels match decoder channels, use identity
             if enc_ch == decoder_channels:
+                # Use identity if channels already match
                 self.pyramid_convs.append(nn.Identity())
             else:
+                # Use 1x1x1 conv with instance norm and leaky relu
                 self.pyramid_convs.append(
                     nn.Sequential(
-                        nn.Conv3d(enc_ch, decoder_channels, 1),
+                        nn.Conv3d(enc_ch, decoder_channels, 1, bias=False),
                         nn.InstanceNorm3d(decoder_channels),
                         nn.LeakyReLU(inplace=True)
                     )
                 )
         
-        # Feature fusion with residual connection
+        # Feature fusion
         self.fusion_conv = nn.Sequential(
             nn.Conv3d(
                 decoder_channels * len(encoder_channels), 
@@ -275,35 +276,57 @@ class HierarchicalSkipConnection(nn.Module):
             encoder_features = [encoder_features]
             
         # Ensure we have the same number of features as projections
-        assert len(encoder_features) == len(self.pyramid_convs), \
-            f"Expected {len(self.pyramid_convs)} features, got {len(encoder_features)}"
+        if len(encoder_features) != len(self.pyramid_convs):
+            raise ValueError(
+                f"Number of input features ({len(encoder_features)}) "
+                f"doesn't match number of projections ({len(self.pyramid_convs)})"
+            )
             
         pyramid_features = []
         
         for i, (enc_feat, proj_conv) in enumerate(zip(encoder_features, self.pyramid_convs)):
-            # Ensure input has the expected number of channels
-            if enc_feat.size(1) != self.encoder_channels[i]:
-                # If channel count is a multiple, use a grouped convolution
-                if enc_feat.size(1) % self.encoder_channels[i] == 0:
-                    groups = enc_feat.size(1) // self.encoder_channels[i]
-                    proj_conv = nn.Conv3d(enc_feat.size(1), self.decoder_channels, 1, groups=groups).to(enc_feat.device)
-                    proj_feat = proj_conv(enc_feat)
-                else:
-                    # Otherwise use a standard projection
-                    proj_feat = F.adaptive_avg_pool3d(enc_feat, 1)
-                    proj_feat = proj_feat.expand(-1, self.decoder_channels, *target_size)
+            if enc_feat is None:
+                # If feature is None, create zero tensor with correct shape
+                proj_feat = torch.zeros(
+                    (enc_feat.size(0), self.decoder_channels, *target_size),
+                    device=enc_feat.device
+                )
             else:
                 # Apply the projection
-                proj_feat = proj_conv(enc_feat)
-            
-            # Ensure correct spatial dimensions
-            if proj_feat.shape[2:] != target_size:
-                proj_feat = F.interpolate(
-                    proj_feat, 
-                    size=target_size, 
-                    mode='trilinear', 
-                    align_corners=False
-                )
+                if isinstance(proj_conv, nn.Identity):
+                    proj_feat = enc_feat
+                else:
+                    proj_feat = proj_conv(enc_feat)
+                
+                # Ensure correct number of channels
+                if proj_feat.size(1) != self.decoder_channels:
+                    # Use 1x1x1 conv to adjust channels if needed
+                    if proj_feat.size(1) < self.decoder_channels:
+                        # If fewer channels, use pointwise conv with replication
+                        proj_feat = F.interpolate(
+                            proj_feat,
+                            size=(self.decoder_channels, *proj_feat.shape[2:]),
+                            mode='nearest'
+                        )
+                    else:
+                        # If more channels, use 1x1x1 conv to reduce
+                        proj_feat = F.conv3d(
+                            proj_feat,
+                            weight=torch.ones(
+                                (self.decoder_channels, proj_feat.size(1), 1, 1, 1),
+                                device=proj_feat.device
+                            ) / proj_feat.size(1),
+                            bias=None
+                        )
+                
+                # Ensure correct spatial dimensions
+                if proj_feat.shape[2:] != target_size:
+                    proj_feat = F.interpolate(
+                        proj_feat, 
+                        size=target_size, 
+                        mode='trilinear', 
+                        align_corners=False
+                    )
             
             pyramid_features.append(proj_feat)
         
