@@ -392,6 +392,7 @@ class EnhancedSwinTransformerBlock(SwinTransformerBlock):
         self.use_multi_scale_attention = use_multi_scale_attention
         self.use_adaptive_window = use_adaptive_window
         if use_multi_scale_attention:
+            # Replace original single-scale attention with multi-scale version
             self.multi_scale_attn = MultiScaleWindowAttention(
                 dim=dim,
                 num_heads=num_heads,
@@ -400,6 +401,8 @@ class EnhancedSwinTransformerBlock(SwinTransformerBlock):
                 attn_drop=attn_drop,
                 proj_drop=drop,
             )
+            # Remove the original attention module to prevent unused parameters warning
+            self.attn = nn.Identity()
         if use_adaptive_window:
             self.adaptive_window = AdaptiveWindowSizeModule(dim)
 
