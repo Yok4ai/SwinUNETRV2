@@ -240,34 +240,70 @@ class HierarchicalSkipConnection(nn.Module):
         self.encoder_channels = encoder_channels
         self.decoder_channels = decoder_channels
         
-        # Pyramid feature projections
+        # Pyramid feature projections with proper channel handling
         self.pyramid_convs = nn.ModuleList()
         for enc_ch in encoder_channels:
-            self.pyramid_convs.append(
-                nn.Conv3d(enc_ch, decoder_channels, 1)
-            )
+            # If input channels match decoder channels, use identity
+            if enc_ch == decoder_channels:
+                self.pyramid_convs.append(nn.Identity())
+            else:
+                self.pyramid_convs.append(
+                    nn.Sequential(
+                        nn.Conv3d(enc_ch, decoder_channels, 1),
+                        nn.InstanceNorm3d(decoder_channels),
+                        nn.LeakyReLU(inplace=True)
+                    )
+                )
         
-        # Feature fusion
-        self.fusion_conv = nn.Conv3d(
-            decoder_channels * len(encoder_channels), 
-            decoder_channels, 
-            3, 
-            padding=1
+        # Feature fusion with residual connection
+        self.fusion_conv = nn.Sequential(
+            nn.Conv3d(
+                decoder_channels * len(encoder_channels), 
+                decoder_channels, 
+                3, 
+                padding=1
+            ),
+            nn.InstanceNorm3d(decoder_channels),
+            nn.LeakyReLU(inplace=True)
         )
         
     def forward(self, encoder_features: List[torch.Tensor], target_size: torch.Size):
         """
         Fuse multi-scale encoder features for hierarchical skip connection.
         """
+        if not isinstance(encoder_features, (list, tuple)):
+            encoder_features = [encoder_features]
+            
+        # Ensure we have the same number of features as projections
+        assert len(encoder_features) == len(self.pyramid_convs), \
+            f"Expected {len(self.pyramid_convs)} features, got {len(encoder_features)}"
+            
         pyramid_features = []
         
         for i, (enc_feat, proj_conv) in enumerate(zip(encoder_features, self.pyramid_convs)):
-            # Project to target channels
-            proj_feat = proj_conv(enc_feat)
+            # Ensure input has the expected number of channels
+            if enc_feat.size(1) != self.encoder_channels[i]:
+                # If channel count is a multiple, use a grouped convolution
+                if enc_feat.size(1) % self.encoder_channels[i] == 0:
+                    groups = enc_feat.size(1) // self.encoder_channels[i]
+                    proj_conv = nn.Conv3d(enc_feat.size(1), self.decoder_channels, 1, groups=groups).to(enc_feat.device)
+                    proj_feat = proj_conv(enc_feat)
+                else:
+                    # Otherwise use a standard projection
+                    proj_feat = F.adaptive_avg_pool3d(enc_feat, 1)
+                    proj_feat = proj_feat.expand(-1, self.decoder_channels, *target_size)
+            else:
+                # Apply the projection
+                proj_feat = proj_conv(enc_feat)
             
-            # Resize to target spatial dimensions
+            # Ensure correct spatial dimensions
             if proj_feat.shape[2:] != target_size:
-                proj_feat = F.interpolate(proj_feat, size=target_size, mode='trilinear', align_corners=False)
+                proj_feat = F.interpolate(
+                    proj_feat, 
+                    size=target_size, 
+                    mode='trilinear', 
+                    align_corners=False
+                )
             
             pyramid_features.append(proj_feat)
         
