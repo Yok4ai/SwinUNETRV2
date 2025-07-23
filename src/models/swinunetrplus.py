@@ -612,7 +612,7 @@ class SwinUNETR(nn.Module):
         use_multi_scale_attention: bool = True,
         use_adaptive_window: bool = True,
         use_cross_layer_fusion: bool = True,
-        use_hierarchical_skip: bool = True,
+        use_hierarchical_skip: bool = False,
         use_enhanced_v2_blocks: bool = True,
         multi_scale_window_sizes: List[int] = [7, 5, 3],
     ) -> None:
