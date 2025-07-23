@@ -634,11 +634,11 @@ class SwinUNETR(nn.Module):
         downsample: str | nn.Module = "merging",
         use_v2: bool = True,  # Default to True for enhanced version
         # New parameters for SwinUNETRPlus
-        use_multi_scale_attention: bool = True,
-        use_adaptive_window: bool = True,
-        use_cross_layer_fusion: bool = True,
+        use_multi_scale_attention: bool = False,
+        use_adaptive_window: bool = False,
+        use_cross_layer_fusion: bool = False,
         use_hierarchical_skip: bool = False,
-        use_enhanced_v2_blocks: bool = True,
+        use_enhanced_v2_blocks: bool = False,
         multi_scale_window_sizes: List[int] = [7, 5, 3],
     ) -> None:
         """
