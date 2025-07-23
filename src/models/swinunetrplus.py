@@ -282,14 +282,23 @@ class HierarchicalSkipConnection(nn.Module):
                 f"doesn't match number of projections ({len(self.pyramid_convs)})"
             )
             
+        # Get reference feature for shape and device
+        first_feat = next((f for f in encoder_features if f is not None), None)
+        if first_feat is None:
+            raise ValueError("All encoder features are None in HierarchicalSkipConnection.forward")
+        batch_size = first_feat.size(0)
+        device = first_feat.device
+        dtype = first_feat.dtype
+
         pyramid_features = []
         
         for i, (enc_feat, proj_conv) in enumerate(zip(encoder_features, self.pyramid_convs)):
             if enc_feat is None:
                 # If feature is None, create zero tensor with correct shape
                 proj_feat = torch.zeros(
-                    (enc_feat.size(0), self.decoder_channels, *target_size),
-                    device=enc_feat.device
+                    (batch_size, self.decoder_channels, *target_size),
+                    device=device,
+                    dtype=dtype
                 )
             else:
                 # Apply the projection
@@ -298,26 +307,7 @@ class HierarchicalSkipConnection(nn.Module):
                 else:
                     proj_feat = proj_conv(enc_feat)
                 
-                # Ensure correct number of channels
-                if proj_feat.size(1) != self.decoder_channels:
-                    # Use 1x1x1 conv to adjust channels if needed
-                    if proj_feat.size(1) < self.decoder_channels:
-                        # If fewer channels, use pointwise conv with replication
-                        proj_feat = F.interpolate(
-                            proj_feat,
-                            size=(self.decoder_channels, *proj_feat.shape[2:]),
-                            mode='nearest'
-                        )
-                    else:
-                        # If more channels, use 1x1x1 conv to reduce
-                        proj_feat = F.conv3d(
-                            proj_feat,
-                            weight=torch.ones(
-                                (self.decoder_channels, proj_feat.size(1), 1, 1, 1),
-                                device=proj_feat.device
-                            ) / proj_feat.size(1),
-                            bias=None
-                        )
+                # Channel dimension already matches decoder_channels after projection
                 
                 # Ensure correct spatial dimensions
                 if proj_feat.shape[2:] != target_size:
@@ -847,35 +837,35 @@ class SwinUNETR(nn.Module):
         if self.use_hierarchical_skip:
             # Hierarchical skip for decoder5
             skip_feat_5 = self.hierarchical_skip_5(
-                [dec4, hidden_states_out[3]], 
+                [dec4, hidden_states_out[3]],
                 hidden_states_out[3].shape[2:]
             )
             dec3 = self.decoder5(dec4, skip_feat_5)
-            
+
             # Hierarchical skip for decoder4
             skip_feat_4 = self.hierarchical_skip_4(
-                [dec3, enc3], 
+                [dec3, enc3],
                 enc3.shape[2:]
             )
             dec2 = self.decoder4(dec3, skip_feat_4)
-            
+
             # Hierarchical skip for decoder3
             skip_feat_3 = self.hierarchical_skip_3(
-                [dec2, enc2], 
+                [dec2, enc2],
                 enc2.shape[2:]
             )
             dec1 = self.decoder3(dec2, skip_feat_3)
-            
+
             # Hierarchical skip for decoder2
             skip_feat_2 = self.hierarchical_skip_2(
-                [dec1, enc1], 
+                [dec1, enc1],
                 enc1.shape[2:]
             )
             dec0 = self.decoder2(dec1, skip_feat_2)
-            
+
             # Hierarchical skip for decoder1
             skip_feat_1 = self.hierarchical_skip_1(
-                [dec0, enc0], 
+                [dec0, enc0],
                 enc0.shape[2:]
             )
             out = self.decoder1(dec0, skip_feat_1)
