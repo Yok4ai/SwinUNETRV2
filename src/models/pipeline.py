@@ -367,13 +367,11 @@ class BrainTumorSegmentation(pl.LightningModule):
                 dice_weight = self.max_loss_weight * (1.0 - 0.3 * progress)
                 focal_weight = self.min_loss_weight + (self.max_loss_weight - self.min_loss_weight) * progress
                 tversky_weight = 0.0
-            # Phase 3: Add precision/recall balance (Tversky)
+            # Phase 3: Maintain peak performance without Tversky
             else:
-                progress = min((epoch - self.boundary_epochs) / 15, 1.0)  # 15 epochs to ramp up
-                dice_weight = self.max_loss_weight * 0.8   # Maintain strong dice
-                focal_weight = self.max_loss_weight * 0.7  # Keep focal strong
-                tversky_weight = self.min_loss_weight + (self.max_loss_weight * 0.4 - self.min_loss_weight) * progress  # Moderate tversky
-                
+                dice_weight = self.max_loss_weight * 0.7   # 1.4 - maintain structure foundation
+                focal_weight = self.max_loss_weight        # 2.0 - keep peak boundary refinement
+                tversky_weight = 0.0
             return dice_weight, focal_weight, tversky_weight
     
     def _get_cascade_weights(self):
