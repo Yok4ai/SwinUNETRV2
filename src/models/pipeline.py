@@ -477,8 +477,12 @@ class BrainTumorSegmentation(pl.LightningModule):
         self.log("train_loss", loss, prog_bar=True)
         
         # Log current learning rate
-        current_lr = self.optimizers().param_groups[0]['lr']
-        self.log("learning_rate", current_lr, prog_bar=True)
+        optimizer = self.optimizers()
+        if isinstance(optimizer, list):
+            current_lr = optimizer[0].param_groups[0]['lr']
+        else:
+            current_lr = optimizer.param_groups[0]['lr']
+        self.log("lr", current_lr, prog_bar=True, on_step=True, on_epoch=False)
 
         # Apply sigmoid and threshold
         outputs = [self.post_trans(i) for i in decollate_batch(outputs)]
