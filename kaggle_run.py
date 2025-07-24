@@ -60,6 +60,7 @@ def parse_cli_args():
     parser.add_argument('--use_warm_restarts', action='store_true', help='Enable cosine annealing with warm restarts (default: False)')
     parser.add_argument('--restart_period', type=int, default=20, help='Restart period in epochs (default: 20)')
     parser.add_argument('--restart_mult', type=int, default=1, help='Restart period multiplier (default: 1)')
+    parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='Path to checkpoint file (.ckpt)')
     return parser.parse_args()
 
 cli_args = parse_cli_args()
@@ -310,6 +311,9 @@ args = argparse.Namespace(
     use_warm_restarts=cli_args.use_warm_restarts,
     restart_period=cli_args.restart_period,
     restart_mult=cli_args.restart_mult,
+    
+    # Checkpoint resuming
+    resume_from_checkpoint=cli_args.resume_from_checkpoint,
 )
 
 # Print final configuration summary

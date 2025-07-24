@@ -51,4 +51,7 @@ def main(args):
   
     # Step 4: Train model
     print("Step 4: Starting training...")
-    train_model(model, trainer, train_loader, val_loader)
+    resume_checkpoint = getattr(args, 'resume_from_checkpoint', None)
+    if resume_checkpoint:
+        print(f"Resuming from checkpoint: {resume_checkpoint}")
+    train_model(model, trainer, train_loader, val_loader, resume_checkpoint)

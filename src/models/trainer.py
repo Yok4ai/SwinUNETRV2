@@ -119,7 +119,7 @@ def setup_training(train_loader, val_loader, args):
 
     return model, trainer
 
-def train_model(model, trainer, train_loader, val_loader):
+def train_model(model, trainer, train_loader, val_loader, resume_from_checkpoint=None):
     """
     Train the model using the provided trainer and data loaders
     
@@ -128,13 +128,15 @@ def train_model(model, trainer, train_loader, val_loader):
         trainer: PyTorch Lightning trainer
         train_loader: Training data loader
         val_loader: Validation data loader
+        resume_from_checkpoint: Path to checkpoint file to resume from
     """
     try:
         # Start training
         trainer.fit(
             model,
             train_dataloaders=train_loader,
-            val_dataloaders=val_loader
+            val_dataloaders=val_loader,
+            ckpt_path=resume_from_checkpoint
         )
         
         # Log final metrics
