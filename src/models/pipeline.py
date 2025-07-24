@@ -279,13 +279,13 @@ class BrainTumorSegmentation(pl.LightningModule):
             # Progressive loss that starts with simple Dice, adds complexity over time
             dice_loss = self.dice_loss(outputs, labels)
             focal_loss = self.focal_loss(outputs, labels)
-            hausdorff_loss = self.hausdorff_loss(outputs, labels)
+            tversky_loss = self.tversky_loss(outputs, labels)
             
-            dice_weight, focal_weight, hausdorff_weight = self._get_progressive_weights()
+            dice_weight, focal_weight, tversky_weight = self._get_progressive_weights()
             total_loss = (
                 dice_weight * dice_loss + 
                 focal_weight * focal_loss + 
-                hausdorff_weight * hausdorff_loss
+                tversky_weight * tversky_loss
             )
             return total_loss
         elif self.loss_type == 'adaptive_complexity_cascade':
@@ -360,21 +360,21 @@ class BrainTumorSegmentation(pl.LightningModule):
             if epoch < self.structure_epochs:
                 dice_weight = self.max_loss_weight
                 focal_weight = self.min_loss_weight
-                hausdorff_weight = 0.0
+                tversky_weight = 0.0
             # Phase 2: Add boundary refinement (Focal)
             elif epoch < self.boundary_epochs:
                 progress = (epoch - self.structure_epochs) / (self.boundary_epochs - self.structure_epochs)
                 dice_weight = self.max_loss_weight * (1.0 - 0.3 * progress)
                 focal_weight = self.min_loss_weight + (self.max_loss_weight - self.min_loss_weight) * progress
-                hausdorff_weight = 0.0
-            # Phase 3: Add fine boundary details (Hausdorff)
+                tversky_weight = 0.0
+            # Phase 3: Add precision/recall balance (Tversky)
             else:
-                progress = min((epoch - self.boundary_epochs) / 20, 1.0)  # 20 epochs to ramp up
-                dice_weight = self.max_loss_weight * 0.7
-                focal_weight = self.max_loss_weight * 0.8
-                hausdorff_weight = self.min_loss_weight + (self.max_loss_weight * 0.5 - self.min_loss_weight) * progress
+                progress = min((epoch - self.boundary_epochs) / 15, 1.0)  # 15 epochs to ramp up
+                dice_weight = self.max_loss_weight * 0.8   # Maintain strong dice
+                focal_weight = self.max_loss_weight * 0.7  # Keep focal strong
+                tversky_weight = self.min_loss_weight + (self.max_loss_weight * 0.4 - self.min_loss_weight) * progress  # Moderate tversky
                 
-            return dice_weight, focal_weight, hausdorff_weight
+            return dice_weight, focal_weight, tversky_weight
     
     def _get_cascade_weights(self):
         """Get cascading complexity weights"""
