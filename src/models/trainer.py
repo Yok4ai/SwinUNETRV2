@@ -4,6 +4,7 @@ import pytorch_lightning as pl
 from monai.data import DataLoader
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
+from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
 import wandb
 from src.models.pipeline import BrainTumorSegmentation
@@ -37,6 +38,9 @@ def setup_training(train_loader, val_loader, args):
         save_top_k=3,
         save_last=True
     )
+
+    # Learning rate monitor callback
+    lr_monitor = LearningRateMonitor(logging_interval='epoch')
 
     # Initialize wandb logger
     wandb_logger = WandbLogger(
@@ -104,7 +108,7 @@ def setup_training(train_loader, val_loader, args):
         strategy=args.strategy,
         gradient_clip_val=args.gradient_clip_val,
         log_every_n_steps=args.log_every_n_steps,
-        callbacks=[early_stop_callback, checkpoint_callback],
+        callbacks=[early_stop_callback, checkpoint_callback, lr_monitor],
         enable_checkpointing=args.enable_checkpointing,
         benchmark=args.benchmark,
         limit_val_batches=args.limit_val_batches,
