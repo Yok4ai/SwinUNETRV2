@@ -475,15 +475,21 @@ python kaggle_run.py --loss_type adaptive_structure_boundary \
 **What it does:**
 - **Phase 1** (0-structure_epochs): Pure Dice for basic structure learning
 - **Phase 2** (structure-boundary_epochs): Dice + Focal for boundary refinement  
-- **Phase 3** (boundary_epochs+): Dice + Focal + Hausdorff for fine details
-- **Progressive Complexity**: Gradually adds loss components
+- **Phase 3** (boundary_epochs+): Dice + Focal + Tversky for precision/recall balance
+- **Progressive Complexity**: Gradually adds loss components with stable gradients
 
 **Training Progression:**
 ```
 Epochs 0-30:    Dice (structure learning)
 Epochs 30-50:   Dice + Focal (boundary refinement)  
-Epochs 50+:     Dice + Focal + Hausdorff (fine details)
+Epochs 50+:     Dice + Focal + Tversky (precision/recall balance)
 ```
+
+**Why Tversky instead of Hausdorff:**
+- **Stable gradients**: No discontinuities or gradient instability
+- **Tunable balance**: α/β parameters control precision vs recall trade-off
+- **Better convergence**: Avoids performance drops common with Hausdorff in Phase 3
+- **Complementary optimization**: Focuses on different aspects than Dice+Focal
 
 **When to use:**
 - ✅ **Extended training** - 120+ epochs recommended
@@ -492,15 +498,17 @@ Epochs 50+:     Dice + Focal + Hausdorff (fine details)
 - ✅ **Maximum quality** - When best possible results are needed
 
 **Parameters:**
-- `structure_epochs`: Duration of structure learning phase
-- `boundary_epochs`: When to add boundary refinement
-- `schedule_start_epoch`: When to begin scheduling
+- `structure_epochs`: Duration of structure learning phase (default: 30)
+- `boundary_epochs`: When to add boundary refinement (default: 50)  
+- `schedule_start_epoch`: When to begin scheduling (default: 10)
+- `tversky_alpha`: Controls false negative penalty (default: 0.5)
+- `tversky_beta`: Controls false positive penalty (default: 0.5)
 
 **Usage:**
 ```bash
 python kaggle_run.py --loss_type adaptive_progressive_hybrid \
   --use_adaptive_scheduling --structure_epochs 40 --boundary_epochs 70 \
-  --schedule_start_epoch 10
+  --schedule_start_epoch 10 --tversky_alpha 0.3 --tversky_beta 0.7
 ```
 
 ---
@@ -861,7 +869,7 @@ class LocalMinimaDetector:
 
 #### For Competition/Research (Maximum Performance):
 ```bash
-# The Ultimate SOTA Pipeline
+# The Ultimate SOTA Pipeline - Now with stable Tversky Phase 3
 python kaggle_run.py --loss_type adaptive_progressive_hybrid \
   --use_adaptive_scheduling \
   --structure_epochs 45 --boundary_epochs 75 --schedule_start_epoch 15 \
