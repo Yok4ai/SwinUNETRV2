@@ -116,6 +116,9 @@ def setup_training(train_loader, val_loader, args):
         logger=wandb_logger,
         profiler=args.profiler
     )
+    
+    # Enable non-strict loading for checkpoint compatibility
+    trainer.strategy.strict_loading = False
 
     return model, trainer
 

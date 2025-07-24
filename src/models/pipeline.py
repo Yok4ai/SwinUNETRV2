@@ -59,6 +59,16 @@ class ModalityAttentionModule(nn.Module):
         return x_refined + x  # Residual connection
 
 class BrainTumorSegmentation(pl.LightningModule):
+    def load_state_dict(self, state_dict, strict=True):
+        """Custom state dict loading with shape compatibility fixes"""
+        # Fix focal_loss.class_weight shape mismatch
+        if 'focal_loss.class_weight' in state_dict:
+            weight = state_dict['focal_loss.class_weight']
+            if weight.dim() == 4 and weight.shape == torch.Size([3, 1, 1, 1]):
+                state_dict['focal_loss.class_weight'] = weight.squeeze()
+        
+        return super().load_state_dict(state_dict, strict=False)
+
     def __init__(self, train_loader, val_loader, max_epochs=100,
                  val_interval=1, learning_rate=1e-4, feature_size=48,
                  weight_decay=1e-5, warmup_epochs=10, roi_size=(96, 96, 96),
