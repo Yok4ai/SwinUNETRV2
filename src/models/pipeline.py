@@ -475,6 +475,10 @@ class BrainTumorSegmentation(pl.LightningModule):
         
         # Log the Train Loss
         self.log("train_loss", loss, prog_bar=True)
+        
+        # Log current learning rate
+        current_lr = self.optimizers().param_groups[0]['lr']
+        self.log("learning_rate", current_lr, prog_bar=True)
 
         # Apply sigmoid and threshold
         outputs = [self.post_trans(i) for i in decollate_batch(outputs)]
