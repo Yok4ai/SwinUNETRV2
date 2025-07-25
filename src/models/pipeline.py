@@ -669,17 +669,19 @@ class BrainTumorSegmentation(pl.LightningModule):
         
         if self.hparams.use_aggressive_restart:
             # Aggressive restart: Restart every epoch with high LR jumps
+            boosted_lr = self.hparams.learning_rate * self.hparams.escape_lr_multiplier
+            
+            # Set the boosted LR as the optimizer's base LR
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = boosted_lr
+            
             scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
                 optimizer,
                 T_0=1,  # Restart every epoch
                 T_mult=1,  # Keep restarting every epoch
-                eta_min=self.hparams.learning_rate * 0.001,  # Very low minimum
+                eta_min=self.hparams.learning_rate * 0.001,  # Very low minimum (original LR * 0.001)
                 last_epoch=-1
             )
-            
-            # Boost the base learning rate for exploration
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = self.hparams.learning_rate * self.hparams.escape_lr_multiplier
             
             return {
                 "optimizer": optimizer,
