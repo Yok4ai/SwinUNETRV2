@@ -101,10 +101,12 @@ class BrainTumorSegmentation(pl.LightningModule):
                  schedule_start_epoch=10,  # When to start scheduling
                  min_loss_weight=0.1,     # Minimum weight for any loss
                  max_loss_weight=2.0,     # Maximum weight for any loss
-                 # Warm restart parameters for local minima escape
-                 use_warm_restarts=False,  # Enable cosine annealing with warm restarts
-                 restart_period=20,        # Restart every N epochs
-                 restart_mult=1,           # Multiplier for restart period
+                 # Local minima escape parameters
+                 use_aggressive_restart=False,  # Restart every epoch for exploration  
+                 use_warm_restarts=False,       # Enable cosine annealing with warm restarts
+                 restart_period=20,             # Restart every N epochs
+                 restart_mult=1,                # Multiplier for restart period
+                 escape_lr_multiplier=3.0       # LR boost factor for aggressive restart
                  ):
         
         super().__init__()
@@ -665,13 +667,37 @@ class BrainTumorSegmentation(pl.LightningModule):
             eps=self.hparams.optimizer_eps
         )
         
-        if self.hparams.use_warm_restarts:
-            # Cosine Annealing with Warm Restarts (helps escape local minima)
+        if self.hparams.use_aggressive_restart:
+            # Aggressive restart: Restart every epoch with high LR jumps
             scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
                 optimizer,
-                T_0=self.hparams.restart_period,  # Initial restart period
-                T_mult=self.hparams.restart_mult,  # Period multiplier after restart
-                eta_min=self.hparams.learning_rate * 0.01,  # Minimum LR (1% of initial)
+                T_0=1,  # Restart every epoch
+                T_mult=1,  # Keep restarting every epoch
+                eta_min=self.hparams.learning_rate * 0.001,  # Very low minimum
+                last_epoch=-1
+            )
+            
+            # Boost the base learning rate for exploration
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = self.hparams.learning_rate * self.hparams.escape_lr_multiplier
+            
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
+                    "frequency": 1,
+                    "name": "learning_rate"
+                }
+            }
+            
+        elif self.hparams.use_warm_restarts:
+            # Standard warm restarts
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                optimizer,
+                T_0=self.hparams.restart_period,  
+                T_mult=self.hparams.restart_mult,  
+                eta_min=self.hparams.learning_rate * 0.01,  
                 last_epoch=-1
             )
             

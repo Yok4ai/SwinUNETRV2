@@ -56,10 +56,12 @@ def parse_cli_args():
     parser.add_argument('--schedule_start_epoch', type=int, default=10, help='Epoch to start adaptive scheduling (default: 10)')
     parser.add_argument('--min_loss_weight', type=float, default=0.1, help='Minimum weight for any loss component (default: 0.1)')
     parser.add_argument('--max_loss_weight', type=float, default=2.0, help='Maximum weight for any loss component (default: 2.0)')
-    # Warm restart parameters for local minima escape
+    # Local minima escape parameters
+    parser.add_argument('--use_aggressive_restart', action='store_true', help='Enable aggressive restart every epoch (default: False)')
     parser.add_argument('--use_warm_restarts', action='store_true', help='Enable cosine annealing with warm restarts (default: False)')
     parser.add_argument('--restart_period', type=int, default=20, help='Restart period in epochs (default: 20)')
     parser.add_argument('--restart_mult', type=int, default=1, help='Restart period multiplier (default: 1)')
+    parser.add_argument('--escape_lr_multiplier', type=float, default=3.0, help='LR boost factor for aggressive restart (default: 3.0)')
     parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='Path to checkpoint file (.ckpt)')
     return parser.parse_args()
 
@@ -307,10 +309,12 @@ args = argparse.Namespace(
     min_loss_weight=cli_args.min_loss_weight,
     max_loss_weight=cli_args.max_loss_weight,
     
-    # Warm restart parameters
+    # Local minima escape parameters
+    use_aggressive_restart=cli_args.use_aggressive_restart,
     use_warm_restarts=cli_args.use_warm_restarts,
     restart_period=cli_args.restart_period,
     restart_mult=cli_args.restart_mult,
+    escape_lr_multiplier=cli_args.escape_lr_multiplier,
     
     # Checkpoint resuming
     resume_from_checkpoint=cli_args.resume_from_checkpoint,
@@ -347,6 +351,9 @@ if args.use_adaptive_scheduling:
     print(f"🎯 Boundary epochs: {args.boundary_epochs}")
     print(f"🚀 Schedule start: {args.schedule_start_epoch}")
     print(f"⚖️ Weight range: {args.min_loss_weight} - {args.max_loss_weight}")
+print(f"🚀 Aggressive restart: {args.use_aggressive_restart}")
+if args.use_aggressive_restart:
+    print(f"⚡ LR multiplier: {args.escape_lr_multiplier}x")
 print(f"🔥 Warm restarts: {args.use_warm_restarts}")
 if args.use_warm_restarts:
     print(f"🔄 Restart period: {args.restart_period} epochs")

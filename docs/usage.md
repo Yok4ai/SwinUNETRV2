@@ -196,21 +196,41 @@ python kaggle_run.py --loss_type adaptive_structure_boundary \
   --min_loss_weight 0.05 --max_loss_weight 3.0
 ```
 
-### 🔥 Warm Restart Parameters
+### 🔥 Local Minima Escape Parameters
 
 | **Parameter** | **Type** | **Default** | **Description** |
 |:--------------|:---------|:------------|:----------------|
-| `--use_warm_restarts` | flag | `False` | Enable warm restarts |
+| `--use_aggressive_restart` | flag | `False` | Enable aggressive restart every epoch |
+| `--escape_lr_multiplier` | float | `3.0` | LR boost factor for aggressive restart |
+| `--use_warm_restarts` | flag | `False` | Enable standard warm restarts |
 | `--restart_period` | int | `20` | Restart period in epochs |
 | `--restart_mult` | int | `1` | Period multiplier after restart |
 
 **Usage Examples:**
 ```bash
-# Local minima escape with frequent restarts
+# Aggressive restart for breaking local minima (RECOMMENDED for stuck training)
+python kaggle_run.py --use_aggressive_restart --escape_lr_multiplier 4.0
+
+# Resume from checkpoint with aggressive restart
+python kaggle_run.py --use_aggressive_restart --escape_lr_multiplier 3.0 \
+  --learning_rate 5e-5 --resume_from_checkpoint checkpoints/model-epoch-036.ckpt
+
+# Standard warm restarts with frequent periods
 python kaggle_run.py --use_warm_restarts --restart_period 15
 
 # Progressive restart periods
 python kaggle_run.py --use_warm_restarts --restart_period 25 --restart_mult 2
+```
+
+#### 🚨 Breaking Local Minima from Checkpoints
+```bash
+# If your training gets stuck at 94% dice around epoch 36
+python kaggle_run.py \
+  --use_aggressive_restart \
+  --escape_lr_multiplier 4.0 \
+  --learning_rate 5e-5 \
+  --epochs 60 \
+  --resume_from_checkpoint checkpoints/your-checkpoint.ckpt
 ```
 
 ### 🔧 Inference Parameters

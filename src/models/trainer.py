@@ -93,10 +93,12 @@ def setup_training(train_loader, val_loader, args):
         schedule_start_epoch=getattr(args, 'schedule_start_epoch', 10),
         min_loss_weight=getattr(args, 'min_loss_weight', 0.1),
         max_loss_weight=getattr(args, 'max_loss_weight', 2.0),
-        # Warm restart parameters
+        # Local minima escape parameters
+        use_aggressive_restart=getattr(args, 'use_aggressive_restart', False),
         use_warm_restarts=getattr(args, 'use_warm_restarts', False),
         restart_period=getattr(args, 'restart_period', 20),
         restart_mult=getattr(args, 'restart_mult', 1),
+        escape_lr_multiplier=getattr(args, 'escape_lr_multiplier', 3.0),
     )
 
     # Setup trainer
