@@ -40,7 +40,7 @@ def setup_training(train_loader, val_loader, args):
     )
 
     # Learning rate monitor callback
-    lr_monitor = LearningRateMonitor(logging_interval='step')
+    lr_monitor = LearningRateMonitor(logging_interval='epoch')
 
     # Generate dynamic wandb run name based on key parameters
     run_name_parts = []
