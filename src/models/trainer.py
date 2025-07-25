@@ -42,10 +42,29 @@ def setup_training(train_loader, val_loader, args):
     # Learning rate monitor callback
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
 
+    # Generate dynamic wandb run name based on key parameters
+    run_name_parts = []
+    run_name_parts.append(getattr(args, 'loss_type', 'dice'))
+    run_name_parts.append(f"e{args.epochs}")
+    run_name_parts.append(f"lr{args.learning_rate:.0e}")
+    
+    if getattr(args, 'use_aggressive_restart', False):
+        run_name_parts.append(f"aggr-{getattr(args, 'escape_lr_multiplier', 3.0):.1f}x")
+    elif getattr(args, 'use_warm_restarts', False):
+        run_name_parts.append(f"warm-{getattr(args, 'restart_period', 20)}")
+    
+    if getattr(args, 'use_adaptive_scheduling', False):
+        run_name_parts.append("adaptive")
+    
+    if getattr(args, 'use_class_weights', False):
+        run_name_parts.append("weighted")
+    
+    dynamic_name = "-".join(run_name_parts)
+    
     # Initialize wandb logger
     wandb_logger = WandbLogger(
         project="brain-tumor-segmentation",
-        name="swinunetr-v2-experimental",
+        name=dynamic_name,
         log_model=False
     )
 
