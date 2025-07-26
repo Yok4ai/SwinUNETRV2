@@ -19,9 +19,14 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 
 # Import existing components
-from .swinunetrplus import SwinUNETR
+from ..models.swinunetrplus import SwinUNETR
 from ..data.augmentations import get_transforms
 from ..data.convert_labels import ConvertLabels
+
+# Import kaggle_setup for automatic dataset.json creation
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+from kaggle_setup import prepare_brats_data
 
 class TTATransforms:
     """Test Time Augmentation transforms for medical image segmentation."""
@@ -99,7 +104,8 @@ class StandaloneValidationPipeline:
     
     def __init__(self, 
                  checkpoint_path: str,
-                 data_dir: str,
+                 data_dir: str = None,
+                 input_dir: str = None,
                  dataset: str = "brats2023",
                  batch_size: int = 1,
                  num_workers: int = 4,
@@ -127,6 +133,7 @@ class StandaloneValidationPipeline:
         
         self.checkpoint_path = checkpoint_path
         self.data_dir = data_dir
+        self.input_dir = input_dir
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -264,8 +271,20 @@ class StandaloneValidationPipeline:
         # Get transforms
         _, val_transforms = get_transforms(img_size=self.roi_size[0], dataset=self.dataset)
         
+        # Handle data directory - create dataset.json if needed
+        if self.input_dir and not self.data_dir:
+            # Create dataset.json from input directory
+            print(f"Creating dataset.json from input directory: {self.input_dir}")
+            output_dir = "/kaggle/working/json"
+            os.makedirs(output_dir, exist_ok=True)
+            prepare_brats_data(self.input_dir, output_dir, dataset=self.dataset)
+            dataset_path = os.path.join(output_dir, "dataset.json")
+            print(f"Created dataset.json at: {dataset_path}")
+        else:
+            # Use existing data_dir
+            dataset_path = self.data_dir if self.data_dir.endswith('dataset.json') else os.path.join(self.data_dir, "dataset.json")
+        
         # Load dataset
-        dataset_path = self.data_dir if self.data_dir.endswith('dataset.json') else os.path.join(self.data_dir, "dataset.json")
         with open(dataset_path) as f:
             datalist = json.load(f)["training"]
         
@@ -600,8 +619,13 @@ def main():
     # Required arguments
     parser.add_argument('--checkpoint_path', type=str, required=True,
                         help='Path to model checkpoint (.ckpt or .pth)')
-    parser.add_argument('--data_dir', type=str, required=True,
-                        help='Path to data directory containing dataset.json')
+    
+    # Data source arguments (mutually exclusive)
+    data_group = parser.add_mutually_exclusive_group(required=True)
+    data_group.add_argument('--data_dir', type=str,
+                           help='Path to data directory containing dataset.json')
+    data_group.add_argument('--input_dir', type=str,
+                           help='Path to input directory with BraTS data (will create dataset.json in /kaggle/working/json)')
     
     # Dataset and basic settings
     parser.add_argument('--dataset', type=str, default='brats2023', 
@@ -661,6 +685,7 @@ def main():
     pipeline = StandaloneValidationPipeline(
         checkpoint_path=args.checkpoint_path,
         data_dir=args.data_dir,
+        input_dir=args.input_dir,
         dataset=args.dataset,
         batch_size=args.batch_size,
         num_workers=args.num_workers,

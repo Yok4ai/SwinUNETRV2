@@ -50,7 +50,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 # Import the validation pipeline
-from src.models.validation import main
+from src.utils.tta import main
 
 if __name__ == "__main__":
     # Print header
