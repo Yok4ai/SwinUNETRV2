@@ -372,8 +372,8 @@ class BrainTumorSegmentation(pl.LightningModule):
         # Phase 3: Add fine boundary details (Hausdorff)
         else:
             # progress = min((epoch - self.boundary_epochs) / 20, 1.0)  # 20 epochs to ramp up
-            dice_weight = self.max_loss_weight * 1.0
-            focal_weight = self.max_loss_weight * 1.0
+            dice_weight = self.max_loss_weight * 0.7
+            focal_weight = self.max_loss_weight * 0.3
             # hausdorff_weight = self.min_loss_weight + (self.max_loss_weight * 0.5 - self.min_loss_weight) * progress
             hausdorff_weight = 0.0
         return dice_weight, focal_weight, hausdorff_weight
