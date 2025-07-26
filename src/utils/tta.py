@@ -747,8 +747,8 @@ class StandaloneValidationPipeline:
         results = self.validate()
         self.print_results(results)
         
-        if self.save_predictions or True:  # Always save results
-            self.save_results(results)
+        # Always save results summary (JSON), optionally save prediction arrays
+        self.save_results(results)
             
         if self.log_to_wandb:
             wandb.finish()
