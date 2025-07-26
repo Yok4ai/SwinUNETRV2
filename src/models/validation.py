@@ -238,7 +238,7 @@ class StandaloneValidationPipeline:
         # Load checkpoint
         if self.checkpoint_path.endswith('.ckpt'):
             # Lightning checkpoint - extract only the SwinUNETR model weights
-            checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
+            checkpoint = torch.load(self.checkpoint_path, map_location=self.device, weights_only=False)
             model_state_dict = {}
             for key, value in checkpoint['state_dict'].items():
                 if key.startswith('model.'):
@@ -248,7 +248,7 @@ class StandaloneValidationPipeline:
             self.model.load_state_dict(model_state_dict, strict=False)
         else:
             # PyTorch state dict
-            state_dict = torch.load(self.checkpoint_path, map_location=self.device)
+            state_dict = torch.load(self.checkpoint_path, map_location=self.device, weights_only=False)
             self.model.load_state_dict(state_dict, strict=False)
             
         self.model.to(self.device)
