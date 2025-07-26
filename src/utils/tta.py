@@ -129,7 +129,8 @@ class StandaloneValidationPipeline:
                  save_predictions: bool = False,
                  output_dir: str = "./validation_results",
                  log_to_wandb: bool = False,
-                 wandb_project: str = "swinunetr-validation"):
+                 wandb_project: str = "swinunetr-validation",
+                 outlier_threshold: float = 0.3):
         
         self.checkpoint_path = checkpoint_path
         self.data_dir = data_dir
@@ -160,6 +161,7 @@ class StandaloneValidationPipeline:
         self.output_dir = Path(output_dir)
         self.log_to_wandb = log_to_wandb
         self.wandb_project = wandb_project
+        self.outlier_threshold = outlier_threshold
         
         # Initialize components
         self.model = None
@@ -171,6 +173,7 @@ class StandaloneValidationPipeline:
         self.dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
         self.jaccard_metric = MeanIoU(include_background=True, reduction="mean", ignore_empty=True)
         self.hausdorff_metric = HausdorffDistanceMetric(include_background=False, reduction="mean")
+        self.hausdorff_metric_95 = HausdorffDistanceMetric(include_background=False, reduction="mean", percentile=95)
         
         # Post-processing
         self.post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=self.threshold)])
@@ -183,6 +186,7 @@ class StandaloneValidationPipeline:
             'dice_et': [],
             'mean_iou': [],
             'hausdorff': [],
+            'hausdorff_95': [],
             'precision': [],
             'recall': [],
             'f1': []
@@ -394,6 +398,7 @@ class StandaloneValidationPipeline:
         self.dice_metric_batch.reset()
         self.jaccard_metric.reset()
         self.hausdorff_metric.reset()
+        self.hausdorff_metric_95.reset()
         
         total_time = 0
         num_samples = 0
@@ -422,6 +427,7 @@ class StandaloneValidationPipeline:
                 self.dice_metric_batch(y_pred=val_outputs_processed, y=val_labels_processed)
                 self.jaccard_metric(y_pred=val_outputs_processed, y=val_labels_processed)
                 self.hausdorff_metric(y_pred=val_outputs_processed, y=val_labels_processed)
+                self.hausdorff_metric_95(y_pred=val_outputs_processed, y=val_labels_processed)
                 
                 # Compute additional metrics
                 additional_metrics = self.compute_metrics(val_outputs_processed, val_labels_processed)
@@ -431,11 +437,19 @@ class StandaloneValidationPipeline:
                 mean_iou = self.jaccard_metric.aggregate().item()
                 dice_batch = self.dice_metric_batch.aggregate()
                 
+                # Hausdorff distance (standard)
                 hausdorff_values = self.hausdorff_metric.aggregate(reduction='none')
                 if not isinstance(hausdorff_values, torch.Tensor):
                     hausdorff_values = torch.tensor(hausdorff_values)
                 valid = torch.isfinite(hausdorff_values)
                 hausdorff = hausdorff_values[valid].mean().item() if valid.any() else float('nan')
+                
+                # Hausdorff distance 95th percentile
+                hausdorff_95_values = self.hausdorff_metric_95.aggregate(reduction='none')
+                if not isinstance(hausdorff_95_values, torch.Tensor):
+                    hausdorff_95_values = torch.tensor(hausdorff_95_values)
+                valid_95 = torch.isfinite(hausdorff_95_values)
+                hausdorff_95 = hausdorff_95_values[valid_95].mean().item() if valid_95.any() else float('nan')
                 
                 # Store results
                 self.results['mean_dice'].append(mean_dice)
@@ -444,6 +458,7 @@ class StandaloneValidationPipeline:
                 self.results['dice_et'].append(dice_batch[2].item())
                 self.results['mean_iou'].append(mean_iou)
                 self.results['hausdorff'].append(hausdorff)
+                self.results['hausdorff_95'].append(hausdorff_95)
                 self.results['precision'].append(additional_metrics['precision'])
                 self.results['recall'].append(additional_metrics['recall'])
                 self.results['f1'].append(additional_metrics['f1'])
@@ -461,6 +476,7 @@ class StandaloneValidationPipeline:
                 self.dice_metric_batch.reset()
                 self.jaccard_metric.reset()
                 self.hausdorff_metric.reset()
+                self.hausdorff_metric_95.reset()
                 
                 # Track timing
                 batch_time = time.time() - start_time
@@ -475,18 +491,54 @@ class StandaloneValidationPipeline:
         
         # Compute final statistics
         final_results = {}
+        
+        # Count outliers based on mean_dice threshold
+        mean_dice_values = [v for v in self.results['mean_dice'] if not np.isnan(v)]
+        outlier_indices = [i for i, v in enumerate(mean_dice_values) if v < self.outlier_threshold]
+        num_outliers = len(outlier_indices)
+        num_total_cases = len(mean_dice_values)
+        outlier_percentage = (num_outliers / num_total_cases * 100) if num_total_cases > 0 else 0
+        
+        final_results['total_cases'] = num_total_cases
+        final_results['outlier_cases'] = num_outliers
+        final_results['outlier_percentage'] = outlier_percentage
+        final_results['outlier_threshold'] = self.outlier_threshold
+        
         for metric_name, values in self.results.items():
             if values:
                 # Filter out NaN values for statistics
                 valid_values = [v for v in values if not np.isnan(v)]
                 if valid_values:
-                    final_results[f"{metric_name}_mean"] = np.mean(valid_values)
-                    final_results[f"{metric_name}_std"] = np.std(valid_values)
-                    final_results[f"{metric_name}_median"] = np.median(valid_values)
+                    # All cases statistics
+                    final_results[f"{metric_name}_mean_all"] = np.mean(valid_values)
+                    final_results[f"{metric_name}_std_all"] = np.std(valid_values)
+                    final_results[f"{metric_name}_median_all"] = np.median(valid_values)
+                    
+                    # Outlier-filtered statistics (only for mean_dice-based filtering)
+                    if metric_name == 'mean_dice':
+                        # Filter based on dice threshold
+                        filtered_values = [v for v in valid_values if v >= self.outlier_threshold]
+                    else:
+                        # For other metrics, filter using the same indices as mean_dice outliers
+                        filtered_values = [valid_values[i] for i in range(len(valid_values)) 
+                                         if i not in outlier_indices]
+                    
+                    if filtered_values:
+                        final_results[f"{metric_name}_mean_filtered"] = np.mean(filtered_values)
+                        final_results[f"{metric_name}_std_filtered"] = np.std(filtered_values)
+                        final_results[f"{metric_name}_median_filtered"] = np.median(filtered_values)
+                    else:
+                        final_results[f"{metric_name}_mean_filtered"] = float('nan')
+                        final_results[f"{metric_name}_std_filtered"] = float('nan')
+                        final_results[f"{metric_name}_median_filtered"] = float('nan')
                 else:
-                    final_results[f"{metric_name}_mean"] = float('nan')
-                    final_results[f"{metric_name}_std"] = float('nan')
-                    final_results[f"{metric_name}_median"] = float('nan')
+                    # No valid values
+                    final_results[f"{metric_name}_mean_all"] = float('nan')
+                    final_results[f"{metric_name}_std_all"] = float('nan')
+                    final_results[f"{metric_name}_median_all"] = float('nan')
+                    final_results[f"{metric_name}_mean_filtered"] = float('nan')
+                    final_results[f"{metric_name}_std_filtered"] = float('nan')
+                    final_results[f"{metric_name}_median_filtered"] = float('nan')
         
         # Add timing information
         final_results['avg_time_per_sample'] = total_time / num_samples if num_samples > 0 else 0
@@ -496,14 +548,14 @@ class StandaloneValidationPipeline:
         return final_results
         
     def print_results(self, results: Dict[str, float]):
-        """Print validation results in a formatted manner."""
-        print("\n" + "="*80)
-        print("VALIDATION RESULTS")
-        print("="*80)
+        """Print validation results."""
+        print("\n" + "="*100)
+        print("COMPREHENSIVE VALIDATION RESULTS")
+        print("="*100)
         
+        # Configuration
         print(f"Dataset: {self.dataset}")
         print(f"Checkpoint: {os.path.basename(self.checkpoint_path)}")
-        print(f"Number of samples: {results['num_samples']}")
         print(f"TTA enabled: {self.use_tta}")
         if self.use_tta:
             print(f"TTA merge mode: {self.tta_merge_mode}")
@@ -511,57 +563,148 @@ class StandaloneValidationPipeline:
         print(f"Overlap: {self.overlap}")
         print(f"Threshold: {self.threshold}")
         
-        print("\nPERFORMANCE METRICS:")
-        print("-" * 40)
+        # Sample information and outlier analysis
+        total_cases = results.get('total_cases', 0)
+        outlier_cases = results.get('outlier_cases', 0)
+        outlier_pct = results.get('outlier_percentage', 0)
+        outlier_thresh = results.get('outlier_threshold', 0.3)
         
-        # Main metrics
-        dice_mean = results.get('mean_dice_mean', float('nan'))
-        dice_std = results.get('mean_dice_std', float('nan'))
-        print(f"Mean Dice Score: {dice_mean:.4f} ± {dice_std:.4f}")
+        print(f"\nSAMPLE ANALYSIS:")
+        print("-" * 50)
+        print(f"Total cases: {total_cases}")
+        print(f"Outlier threshold (Dice): {outlier_thresh:.3f}")
+        print(f"Outlier cases: {outlier_cases} ({outlier_pct:.1f}%)")
+        print(f"Valid cases after filtering: {total_cases - outlier_cases}")
         
-        # Individual class Dice scores
-        tc_mean = results.get('dice_tc_mean', float('nan'))
-        tc_std = results.get('dice_tc_std', float('nan'))
-        print(f"TC Dice Score:   {tc_mean:.4f} ± {tc_std:.4f}")
+        # Main performance metrics - ALL CASES
+        print(f"\nPERFORMANCE METRICS - ALL CASES (n={total_cases}):")
+        print("-" * 50)
         
-        wt_mean = results.get('dice_wt_mean', float('nan'))
-        wt_std = results.get('dice_wt_std', float('nan'))
-        print(f"WT Dice Score:   {wt_mean:.4f} ± {wt_std:.4f}")
+        dice_mean_all = results.get('mean_dice_mean_all', float('nan'))
+        dice_std_all = results.get('mean_dice_std_all', float('nan'))
+        dice_median_all = results.get('mean_dice_median_all', float('nan'))
+        print(f"Mean Dice Score:   {dice_mean_all:.4f} ± {dice_std_all:.4f} (median: {dice_median_all:.4f})")
         
-        et_mean = results.get('dice_et_mean', float('nan'))
-        et_std = results.get('dice_et_std', float('nan'))
-        print(f"ET Dice Score:   {et_mean:.4f} ± {et_std:.4f}")
+        tc_mean_all = results.get('dice_tc_mean_all', float('nan'))
+        tc_std_all = results.get('dice_tc_std_all', float('nan'))
+        tc_median_all = results.get('dice_tc_median_all', float('nan'))
+        print(f"TC Dice Score:     {tc_mean_all:.4f} ± {tc_std_all:.4f} (median: {tc_median_all:.4f})")
         
-        # Other metrics
-        iou_mean = results.get('mean_iou_mean', float('nan'))
-        iou_std = results.get('mean_iou_std', float('nan'))
-        print(f"Mean IoU:        {iou_mean:.4f} ± {iou_std:.4f}")
+        wt_mean_all = results.get('dice_wt_mean_all', float('nan'))
+        wt_std_all = results.get('dice_wt_std_all', float('nan'))
+        wt_median_all = results.get('dice_wt_median_all', float('nan'))
+        print(f"WT Dice Score:     {wt_mean_all:.4f} ± {wt_std_all:.4f} (median: {wt_median_all:.4f})")
         
-        hausdorff_mean = results.get('hausdorff_mean', float('nan'))
-        hausdorff_std = results.get('hausdorff_std', float('nan'))
-        print(f"Hausdorff Dist.: {hausdorff_mean:.4f} ± {hausdorff_std:.4f}")
+        et_mean_all = results.get('dice_et_mean_all', float('nan'))
+        et_std_all = results.get('dice_et_std_all', float('nan'))
+        et_median_all = results.get('dice_et_median_all', float('nan'))
+        print(f"ET Dice Score:     {et_mean_all:.4f} ± {et_std_all:.4f} (median: {et_median_all:.4f})")
         
-        precision_mean = results.get('precision_mean', float('nan'))
-        precision_std = results.get('precision_std', float('nan'))
-        print(f"Precision:       {precision_mean:.4f} ± {precision_std:.4f}")
+        iou_mean_all = results.get('mean_iou_mean_all', float('nan'))
+        iou_std_all = results.get('mean_iou_std_all', float('nan'))
+        iou_median_all = results.get('mean_iou_median_all', float('nan'))
+        print(f"Mean IoU:          {iou_mean_all:.4f} ± {iou_std_all:.4f} (median: {iou_median_all:.4f})")
         
-        recall_mean = results.get('recall_mean', float('nan'))
-        recall_std = results.get('recall_std', float('nan'))
-        print(f"Recall:          {recall_mean:.4f} ± {recall_std:.4f}")
+        # Hausdorff metrics
+        hd_mean_all = results.get('hausdorff_mean_all', float('nan'))
+        hd_std_all = results.get('hausdorff_std_all', float('nan'))
+        hd_median_all = results.get('hausdorff_median_all', float('nan'))
+        print(f"Hausdorff Dist.:   {hd_mean_all:.4f} ± {hd_std_all:.4f} (median: {hd_median_all:.4f})")
         
-        f1_mean = results.get('f1_mean', float('nan'))
-        f1_std = results.get('f1_std', float('nan'))
-        print(f"F1 Score:        {f1_mean:.4f} ± {f1_std:.4f}")
+        hd95_mean_all = results.get('hausdorff_95_mean_all', float('nan'))
+        hd95_std_all = results.get('hausdorff_95_std_all', float('nan'))
+        hd95_median_all = results.get('hausdorff_95_median_all', float('nan'))
+        print(f"Hausdorff 95:      {hd95_mean_all:.4f} ± {hd95_std_all:.4f} (median: {hd95_median_all:.4f})")
+        
+        # Additional metrics
+        precision_mean_all = results.get('precision_mean_all', float('nan'))
+        precision_std_all = results.get('precision_std_all', float('nan'))
+        print(f"Precision:         {precision_mean_all:.4f} ± {precision_std_all:.4f}")
+        
+        recall_mean_all = results.get('recall_mean_all', float('nan'))
+        recall_std_all = results.get('recall_std_all', float('nan'))
+        print(f"Recall:            {recall_mean_all:.4f} ± {recall_std_all:.4f}")
+        
+        f1_mean_all = results.get('f1_mean_all', float('nan'))
+        f1_std_all = results.get('f1_std_all', float('nan'))
+        print(f"F1 Score:          {f1_mean_all:.4f} ± {f1_std_all:.4f}")
+        
+        # Main performance metrics - FILTERED CASES (outliers removed)
+        filtered_cases = total_cases - outlier_cases
+        if filtered_cases > 0:
+            print(f"\nPERFORMANCE METRICS - OUTLIERS REMOVED (n={filtered_cases}):")
+            print("-" * 50)
+            
+            dice_mean_filt = results.get('mean_dice_mean_filtered', float('nan'))
+            dice_std_filt = results.get('mean_dice_std_filtered', float('nan'))
+            dice_median_filt = results.get('mean_dice_median_filtered', float('nan'))
+            print(f"Mean Dice Score:   {dice_mean_filt:.4f} ± {dice_std_filt:.4f} (median: {dice_median_filt:.4f})")
+            
+            tc_mean_filt = results.get('dice_tc_mean_filtered', float('nan'))
+            tc_std_filt = results.get('dice_tc_std_filtered', float('nan'))
+            tc_median_filt = results.get('dice_tc_median_filtered', float('nan'))
+            print(f"TC Dice Score:     {tc_mean_filt:.4f} ± {tc_std_filt:.4f} (median: {tc_median_filt:.4f})")
+            
+            wt_mean_filt = results.get('dice_wt_mean_filtered', float('nan'))
+            wt_std_filt = results.get('dice_wt_std_filtered', float('nan'))
+            wt_median_filt = results.get('dice_wt_median_filtered', float('nan'))
+            print(f"WT Dice Score:     {wt_mean_filt:.4f} ± {wt_std_filt:.4f} (median: {wt_median_filt:.4f})")
+            
+            et_mean_filt = results.get('dice_et_mean_filtered', float('nan'))
+            et_std_filt = results.get('dice_et_std_filtered', float('nan'))
+            et_median_filt = results.get('dice_et_median_filtered', float('nan'))
+            print(f"ET Dice Score:     {et_mean_filt:.4f} ± {et_std_filt:.4f} (median: {et_median_filt:.4f})")
+            
+            iou_mean_filt = results.get('mean_iou_mean_filtered', float('nan'))
+            iou_std_filt = results.get('mean_iou_std_filtered', float('nan'))
+            iou_median_filt = results.get('mean_iou_median_filtered', float('nan'))
+            print(f"Mean IoU:          {iou_mean_filt:.4f} ± {iou_std_filt:.4f} (median: {iou_median_filt:.4f})")
+            
+            # Hausdorff metrics filtered
+            hd_mean_filt = results.get('hausdorff_mean_filtered', float('nan'))
+            hd_std_filt = results.get('hausdorff_std_filtered', float('nan'))
+            hd_median_filt = results.get('hausdorff_median_filtered', float('nan'))
+            print(f"Hausdorff Dist.:   {hd_mean_filt:.4f} ± {hd_std_filt:.4f} (median: {hd_median_filt:.4f})")
+            
+            hd95_mean_filt = results.get('hausdorff_95_mean_filtered', float('nan'))
+            hd95_std_filt = results.get('hausdorff_95_std_filtered', float('nan'))
+            hd95_median_filt = results.get('hausdorff_95_median_filtered', float('nan'))
+            print(f"Hausdorff 95:      {hd95_mean_filt:.4f} ± {hd95_std_filt:.4f} (median: {hd95_median_filt:.4f})")
+            
+            # Additional metrics filtered
+            precision_mean_filt = results.get('precision_mean_filtered', float('nan'))
+            precision_std_filt = results.get('precision_std_filtered', float('nan'))
+            print(f"Precision:         {precision_mean_filt:.4f} ± {precision_std_filt:.4f}")
+            
+            recall_mean_filt = results.get('recall_mean_filtered', float('nan'))
+            recall_std_filt = results.get('recall_std_filtered', float('nan'))
+            print(f"Recall:            {recall_mean_filt:.4f} ± {recall_std_filt:.4f}")
+            
+            f1_mean_filt = results.get('f1_mean_filtered', float('nan'))
+            f1_std_filt = results.get('f1_std_filtered', float('nan'))
+            print(f"F1 Score:          {f1_mean_filt:.4f} ± {f1_std_filt:.4f}")
         
         # Timing
         avg_time = results.get('avg_time_per_sample', 0)
         total_time = results.get('total_validation_time', 0)
         print(f"\nTIMING:")
-        print("-" * 40)
+        print("-" * 50)
         print(f"Avg time per sample: {avg_time:.2f}s")
         print(f"Total validation time: {total_time:.2f}s")
         
-        print("="*80)
+        # Validation summary
+        print(f"\nVALIDATION SUMMARY:")
+        print("-" * 50)
+        print(f"• Dataset: {self.dataset}")
+        print(f"• Total cases: {total_cases}")
+        print(f"• Outlier exclusion: {outlier_cases} cases with Dice < {outlier_thresh:.3f} ({outlier_pct:.1f}%)")
+        print(f"• Mean Dice (all): {dice_mean_all:.4f} ± {dice_std_all:.4f}")
+        if filtered_cases > 0:
+            print(f"• Mean Dice (filtered): {dice_mean_filt:.4f} ± {dice_std_filt:.4f}")
+        print(f"• Median Dice: {dice_median_all:.4f}")
+        print(f"• TTA: {'Enabled' if self.use_tta else 'Disabled'}")
+        
+        print("="*100)
         
         # Log to WandB
         if self.log_to_wandb:
@@ -674,6 +817,8 @@ def main():
                         help='Log results to Weights & Biases (default: False)')
     parser.add_argument('--wandb_project', type=str, default='swinunetr-validation',
                         help='WandB project name (default: swinunetr-validation)')
+    parser.add_argument('--outlier_threshold', type=float, default=0.3,
+                        help='Dice threshold for outlier detection (default: 0.3)')
     
     # Device
     parser.add_argument('--device', type=str, default='cuda',
@@ -704,7 +849,8 @@ def main():
         save_predictions=args.save_predictions,
         output_dir=args.output_dir,
         log_to_wandb=args.log_to_wandb,
-        wandb_project=args.wandb_project
+        wandb_project=args.wandb_project,
+        outlier_threshold=args.outlier_threshold
     )
     
     # Run validation
