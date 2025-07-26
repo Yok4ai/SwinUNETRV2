@@ -488,41 +488,41 @@ class StandaloneValidationPipeline:
         # Main metrics
         dice_mean = results.get('mean_dice_mean', float('nan'))
         dice_std = results.get('mean_dice_std', float('nan'))
-        print(f"Mean Dice Score: {dice_mean:.4f} ± {dice_std:.4f}")
+        print(f"Mean Dice Score: {dice_mean:.4f} Â± {dice_std:.4f}")
         
         # Individual class Dice scores
         tc_mean = results.get('dice_tc_mean', float('nan'))
         tc_std = results.get('dice_tc_std', float('nan'))
-        print(f"TC Dice Score:   {tc_mean:.4f} ± {tc_std:.4f}")
+        print(f"TC Dice Score:   {tc_mean:.4f} Â± {tc_std:.4f}")
         
         wt_mean = results.get('dice_wt_mean', float('nan'))
         wt_std = results.get('dice_wt_std', float('nan'))
-        print(f"WT Dice Score:   {wt_mean:.4f} ± {wt_std:.4f}")
+        print(f"WT Dice Score:   {wt_mean:.4f} Â± {wt_std:.4f}")
         
         et_mean = results.get('dice_et_mean', float('nan'))
         et_std = results.get('dice_et_std', float('nan'))
-        print(f"ET Dice Score:   {et_mean:.4f} ± {et_std:.4f}")
+        print(f"ET Dice Score:   {et_mean:.4f} Â± {et_std:.4f}")
         
         # Other metrics
         iou_mean = results.get('mean_iou_mean', float('nan'))
         iou_std = results.get('mean_iou_std', float('nan'))
-        print(f"Mean IoU:        {iou_mean:.4f} ± {iou_std:.4f}")
+        print(f"Mean IoU:        {iou_mean:.4f} Â± {iou_std:.4f}")
         
         hausdorff_mean = results.get('hausdorff_mean', float('nan'))
         hausdorff_std = results.get('hausdorff_std', float('nan'))
-        print(f"Hausdorff Dist.: {hausdorff_mean:.4f} ± {hausdorff_std:.4f}")
+        print(f"Hausdorff Dist.: {hausdorff_mean:.4f} Â± {hausdorff_std:.4f}")
         
         precision_mean = results.get('precision_mean', float('nan'))
         precision_std = results.get('precision_std', float('nan'))
-        print(f"Precision:       {precision_mean:.4f} ± {precision_std:.4f}")
+        print(f"Precision:       {precision_mean:.4f} Â± {precision_std:.4f}")
         
         recall_mean = results.get('recall_mean', float('nan'))
         recall_std = results.get('recall_std', float('nan'))
-        print(f"Recall:          {recall_mean:.4f} ± {recall_std:.4f}")
+        print(f"Recall:          {recall_mean:.4f} Â± {recall_std:.4f}")
         
         f1_mean = results.get('f1_mean', float('nan'))
         f1_std = results.get('f1_std', float('nan'))
-        print(f"F1 Score:        {f1_mean:.4f} ± {f1_std:.4f}")
+        print(f"F1 Score:        {f1_mean:.4f} Â± {f1_std:.4f}")
         
         # Timing
         avg_time = results.get('avg_time_per_sample', 0)
