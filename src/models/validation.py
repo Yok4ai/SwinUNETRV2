@@ -448,12 +448,11 @@ class StandaloneValidationPipeline:
                 total_time += batch_time
                 num_samples += val_inputs.size(0)
                 
-                # Log progress
-                if batch_idx % 10 == 0:
-                    total_batches = self.max_batches if self.max_batches else len(self.val_loader)
-                    print(f"Batch {batch_idx}/{total_batches}: "
-                          f"Dice={mean_dice:.4f}, IoU={mean_iou:.4f}, "
-                          f"Time={batch_time:.2f}s")
+                # Log progress for every batch
+                total_batches = self.max_batches if self.max_batches else len(self.val_loader)
+                print(f"Batch {batch_idx}/{total_batches}: "
+                      f"Dice={mean_dice:.4f}, IoU={mean_iou:.4f}, "
+                      f"Time={batch_time:.2f}s")
         
         # Compute final statistics
         final_results = {}
