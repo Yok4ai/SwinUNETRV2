@@ -113,7 +113,7 @@ class StandaloneValidationPipeline:
                  sw_batch_size: int = 1,
                  overlap: float = 0.7,
                  threshold: float = 0.5,
-                 use_tta: bool = True,
+                 use_tta: bool = False,
                  tta_merge_mode: str = "mean",  # "mean", "median", "max"
                  device: str = "cuda",
                  class_weights: Tuple[float, float, float] = (3.0, 1.0, 5.0),
@@ -657,8 +657,8 @@ def main():
                         help='Threshold for post-processing (default: 0.5)')
     
     # TTA parameters
-    parser.add_argument('--use_tta', action='store_true', default=True,
-                        help='Enable Test Time Augmentation (default: True)')
+    parser.add_argument('--use_tta', action='store_true', default=False,
+                        help='Enable Test Time Augmentation (default: False)')
     parser.add_argument('--tta_merge_mode', type=str, default='mean',
                         choices=['mean', 'median', 'max'],
                         help='TTA ensemble method (default: mean)')
