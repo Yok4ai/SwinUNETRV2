@@ -119,6 +119,7 @@ class StandaloneValidationPipeline:
                  downsample: str = "mergingv2",
                  use_modality_attention: bool = False,
                  # Validation settings
+                 max_batches: int = None,  # Limit number of validation batches
                  save_predictions: bool = False,
                  output_dir: str = "./validation_results",
                  log_to_wandb: bool = False,
@@ -147,6 +148,7 @@ class StandaloneValidationPipeline:
         self.use_modality_attention = use_modality_attention
         
         # Validation settings
+        self.max_batches = max_batches
         self.save_predictions = save_predictions
         self.output_dir = Path(output_dir)
         self.log_to_wandb = log_to_wandb
@@ -211,6 +213,9 @@ class StandaloneValidationPipeline:
         
         print(f"Model loaded from: {self.checkpoint_path}")
         print(f"Validation samples: {len(self.val_loader.dataset)}")
+        print(f"Total batches: {len(self.val_loader)}")
+        if self.max_batches:
+            print(f"Limited to: {self.max_batches} batches")
         print(f"Using TTA: {self.use_tta}")
         if self.use_tta:
             print(f"TTA merge mode: {self.tta_merge_mode}")
@@ -376,6 +381,11 @@ class StandaloneValidationPipeline:
         
         with torch.no_grad():
             for batch_idx, batch in enumerate(tqdm(self.val_loader, desc="Validating")):
+                # Break if we've reached the maximum number of batches
+                if self.max_batches and batch_idx >= self.max_batches:
+                    print(f"\nReached maximum batch limit ({self.max_batches}), stopping validation.")
+                    break
+                    
                 start_time = time.time()
                 
                 val_inputs = batch["image"].to(self.device)
@@ -440,7 +450,8 @@ class StandaloneValidationPipeline:
                 
                 # Log progress
                 if batch_idx % 10 == 0:
-                    print(f"Batch {batch_idx}/{len(self.val_loader)}: "
+                    total_batches = self.max_batches if self.max_batches else len(self.val_loader)
+                    print(f"Batch {batch_idx}/{total_batches}: "
                           f"Dice={mean_dice:.4f}, IoU={mean_iou:.4f}, "
                           f"Time={batch_time:.2f}s")
         
@@ -630,6 +641,8 @@ def main():
                         help='TTA ensemble method (default: mean)')
     
     # Output and logging
+    parser.add_argument('--max_batches', type=int, default=None,
+                        help='Maximum number of batches to validate (default: None - all batches)')
     parser.add_argument('--output_dir', type=str, default='./validation_results',
                         help='Output directory for results (default: ./validation_results)')
     parser.add_argument('--save_predictions', action='store_true',
@@ -663,6 +676,7 @@ def main():
         use_v2=args.use_v2,
         downsample=args.downsample,
         use_modality_attention=args.use_modality_attention,
+        max_batches=args.max_batches,
         save_predictions=args.save_predictions,
         output_dir=args.output_dir,
         log_to_wandb=args.log_to_wandb,
